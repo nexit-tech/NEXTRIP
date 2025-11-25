@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Simple static server for Flutter Web deployment on Railway.",
   "scripts": {
-    "postinstall": "flutter build web --release",
+    "postinstall": "bash build.sh", 
     "start": "npx serve -s build/web"
   },
   "dependencies": {
