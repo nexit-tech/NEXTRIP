@@ -1,3 +1,19 @@
+// --- FUNÇÃO PARA LER CHAVES DE AMBIENTE/PROPERTIES ---
+// Esta função lê a chave da API do Google Maps do arquivo 'local.properties'
+// (que deve ser ignorado pelo Git) e a injeta nas variáveis de build.
+fun getLocalProperty(propertyName: String): String {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        val properties = java.util.Properties()
+        // Usa 'use' para fechar o stream com segurança
+        localPropertiesFile.inputStream().use { properties.load(it) }
+        // Retorna o valor da propriedade ou uma string vazia se não for encontrada
+        return properties.getProperty(propertyName) ?: ""
+    }
+    // Retorna uma string vazia se o arquivo local.properties não existir
+    return "" 
+}
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -28,6 +44,10 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // --- INJEÇÃO DA CHAVE DO GOOGLE MAPS API NO AndroidManifest.xml ---
+        // A variável 'MAPS_API_KEY' agora carrega o valor de 'GOOGLE_MAPS_API_KEY' do seu local.properties.
+        manifestPlaceholders["MAPS_API_KEY"] = getLocalProperty("GOOGLE_MAPS_API_KEY")
     }
 
     buildTypes {

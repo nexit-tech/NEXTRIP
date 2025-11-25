@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import '../theme/app_colors.dart';
-import '../components/custom_button.dart';
-import '../components/travel/budget_summary_card.dart';
-import '../components/travel/partner_selection_modal.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:app_v7_web/theme/app_colors.dart';
+import 'package:app_v7_web/components/custom_button.dart';
+import 'package:app_v7_web/components/travel/budget_summary_card.dart';
+import 'package:app_v7_web/components/travel/partner_selection_modal.dart';
+import 'package:app_v7_web/components/custom_calendar_modal.dart';
 
 class TripPlannerPage extends StatefulWidget {
-  final Map<String, dynamic>? tripToEdit; // <--- Recebe dados para edição
+  final Map<String, dynamic>? tripToEdit; 
 
   const TripPlannerPage({super.key, this.tripToEdit});
 
@@ -15,84 +16,62 @@ class TripPlannerPage extends StatefulWidget {
 }
 
 class _TripPlannerPageState extends State<TripPlannerPage> {
+  final _supabase = Supabase.instance.client;
   final _destinationController = TextEditingController();
   DateTime? _startDate;
   DateTime? _endDate;
+  bool _isSaving = false;
   
-  // Lista de itens do roteiro
+  // Lista bruta (pode ter repetidos)
   List<Map<String, dynamic>> _plannedItems = [];
 
-  // Cálculos
-  double get totalCost => _plannedItems.fold(0, (sum, item) => sum + item['price']);
+  // --- CÁLCULOS FINANCEIROS ---
+  double get totalOriginal => _plannedItems.fold(0, (sum, item) => sum + (item['original_price'] ?? item['price']));
   double get totalSavings => _plannedItems.fold(0, (sum, item) => sum + item['discount']);
+  double get totalFinal => totalOriginal - totalSavings;
 
-  // --- LÓGICA DE EDIÇÃO ---
+  // --- AGRUPAMENTO VISUAL (CORRIGIDO: Agrupa por NOME) ---
+  List<Map<String, dynamic>> get _groupedItems {
+    final Map<String, Map<String, dynamic>> grouped = {};
+    
+    for (var item in _plannedItems) {
+      // Usa o NOME como chave. Isso resolve o problema de duplicação ao carregar do banco!
+      final String key = item['name'].toString();
+      
+      if (grouped.containsKey(key)) {
+        // Se já tem esse item, só aumenta a quantidade visual
+        int currentQty = grouped[key]!['qty'] as int;
+        grouped[key]!['qty'] = currentQty + 1;
+      } else {
+        // Se é novo, cria e inicia com 1
+        final newItem = Map<String, dynamic>.from(item);
+        newItem['qty'] = 1;
+        grouped[key] = newItem;
+      }
+    }
+    return grouped.values.toList();
+  }
+
   @override
   void initState() {
     super.initState();
-    // Se veio uma viagem para editar, preenche os campos
     if (widget.tripToEdit != null) {
       final trip = widget.tripToEdit!;
       _destinationController.text = trip['destination'];
       _startDate = trip['startDate'];
       _endDate = trip['endDate'];
-      // Clona a lista para não alterar a referência original antes de salvar
       _plannedItems = List<Map<String, dynamic>>.from(trip['items']);
     }
   }
 
-  // --- NOTIFICAÇÃO PADRONIZADA (BRANCA E FLUTUANTE) ---
-  void _showSnackBar(String msg, {IconData icon = Icons.check_circle}) {
-    ScaffoldMessenger.of(context).clearSnackBars();
+  void _showSnackBar(String msg, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        backgroundColor: AppColors.white,
+        backgroundColor: isError ? Colors.redAccent : AppColors.white,
+        content: Text(msg, style: TextStyle(color: isError ? Colors.white : AppColors.black, fontWeight: FontWeight.bold)),
         behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        elevation: 6,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        content: Row(
-          children: [
-            Icon(icon, color: AppColors.black, size: 20),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                msg,
-                style: const TextStyle(
-                  color: AppColors.black,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14
-                ),
-              ),
-            ),
-          ],
-        ),
-        duration: const Duration(seconds: 3),
       ),
     );
-  }
-
-  // Agrupamento Visual (Igual fizemos antes)
-  List<Map<String, dynamic>> get _groupedItems {
-    final Map<String, Map<String, dynamic>> groupedMap = {};
-    for (var item in _plannedItems) {
-      final name = item['name'];
-      if (groupedMap.containsKey(name)) {
-        groupedMap[name]!['qty']++;
-      } else {
-        final newItem = Map<String, dynamic>.from(item);
-        newItem['qty'] = 1;
-        groupedMap[name] = newItem;
-      }
-    }
-    return groupedMap.values.toList();
-  }
-
-  void _removeOneItem(String itemName) {
-    setState(() {
-      final index = _plannedItems.indexWhere((i) => i['name'] == itemName);
-      if (index != -1) _plannedItems.removeAt(index);
-    });
   }
 
   void _showAddItemModal() {
@@ -105,47 +84,98 @@ class _TripPlannerPageState extends State<TripPlannerPage> {
           setState(() {
             _plannedItems.addAll(items);
           });
-          _showSnackBar("${items.length} item(s) adicionado(s)!");
         },
       ),
     );
   }
 
-  Future<void> _selectDate(bool isStart) async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _startDate ?? DateTime.now(),
-      firstDate: DateTime.now(),
-      lastDate: DateTime(2030),
-      builder: (context, child) => Theme(data: ThemeData.dark(), child: child!),
-    );
-    if (picked != null) setState(() => isStart ? _startDate = picked : _endDate = picked);
+  // Remove UMA unidade pelo NOME (Decremento inteligente)
+  void _removeOneInstance(String itemName) {
+    setState(() {
+      // Procura o primeiro item com esse nome e remove
+      final index = _plannedItems.indexWhere((item) => item['name'].toString() == itemName);
+      if (index != -1) {
+        _plannedItems.removeAt(index);
+      }
+    });
   }
 
-  // Função de Salvar e Voltar
-  void _saveTrip() {
-    if (_destinationController.text.isEmpty || _startDate == null || _endDate == null) {
-      _showSnackBar("Preencha destino e datas!", icon: Icons.warning);
+  void _selectDateRange() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => CustomCalendarModal(
+        startDate: _startDate,
+        endDate: _endDate,
+        onRangeSelected: (start, end) {
+          setState(() {
+            _startDate = start;
+            _endDate = end;
+          });
+        },
+      ),
+    );
+  }
+
+  Future<void> _saveTrip() async {
+    if (_destinationController.text.isEmpty || _startDate == null) {
+      _showSnackBar("Preencha destino e data de ida!", isError: true);
       return;
     }
 
-    // Monta o objeto da viagem
-    final tripData = {
-      'id': widget.tripToEdit?['id'] ?? DateTime.now().toString(), // Mantém ID ou cria novo
-      'destination': _destinationController.text,
-      'startDate': _startDate,
-      'endDate': _endDate,
-      'items': _plannedItems,
-      'totalCost': totalCost,
-      'totalSavings': totalSavings,
-    };
+    setState(() => _isSaving = true);
 
-    // Retorna para a tela anterior com os dados
-    Navigator.pop(context, tripData);
+    try {
+      dynamic tripId;
+
+      final tripData = {
+        'destination': _destinationController.text,
+        'start_date': _startDate!.toIso8601String(),
+        'end_date': (_endDate ?? _startDate!).toIso8601String(),
+        'total_cost': totalFinal,
+        'total_savings': totalSavings,
+      };
+
+      if (widget.tripToEdit != null) {
+        tripId = widget.tripToEdit!['id'];
+        await _supabase.from('trips').update(tripData).eq('id', tripId);
+        // Apaga itens antigos para regravar os novos (mais seguro)
+        await _supabase.from('trip_items').delete().eq('trip_id', tripId);
+      } else {
+        final response = await _supabase.from('trips').insert(tripData).select();
+        tripId = response[0]['id'];
+      }
+
+      if (_plannedItems.isNotEmpty) {
+        final itemsToInsert = _plannedItems.map((item) {
+          return {
+            'trip_id': tripId,
+            'name': item['name'],
+            'category': item['category'],
+            'price': item['price'],
+            'discount': item['discount'],
+            'qty': 1, // No banco salvamos 1 por 1
+            'icon_code': 57563,
+          };
+        }).toList();
+
+        await _supabase.from('trip_items').insert(itemsToInsert);
+      }
+
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      debugPrint("Erro salvar: $e");
+      _showSnackBar("Erro ao salvar roteiro.", isError: true);
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // Usa a lista agrupada para exibir
     final groupedList = _groupedItems;
 
     return Scaffold(
@@ -153,7 +183,7 @@ class _TripPlannerPageState extends State<TripPlannerPage> {
       appBar: AppBar(
         backgroundColor: AppColors.black,
         iconTheme: const IconThemeData(color: AppColors.white),
-        title: Text(widget.tripToEdit == null ? "Novo Roteiro" : "Editar Roteiro", style: const TextStyle(color: AppColors.white)),
+        title: const Text("Planejar Roteiro", style: TextStyle(color: AppColors.white)),
         centerTitle: true,
       ),
       body: SingleChildScrollView(
@@ -165,16 +195,20 @@ class _TripPlannerPageState extends State<TripPlannerPage> {
             TextField(
               controller: _destinationController,
               style: const TextStyle(color: AppColors.white, fontSize: 24, fontWeight: FontWeight.bold),
-              decoration: const InputDecoration(hintText: "Ex: Paris...", hintStyle: TextStyle(color: Colors.grey), border: InputBorder.none),
+              decoration: const InputDecoration(
+                hintText: "Ex: Paris...", 
+                hintStyle: TextStyle(color: Colors.grey), 
+                border: InputBorder.none
+              ),
             ),
             const Divider(color: AppColors.nightRider),
             const SizedBox(height: 24),
 
             Row(
               children: [
-                _dateSelector("DATA IDA", _startDate, () => _selectDate(true)),
+                _dateSelector("DATA IDA", _startDate, _selectDateRange),
                 const SizedBox(width: 16),
-                _dateSelector("DATA VOLTA", _endDate, () => _selectDate(false)),
+                _dateSelector("DATA VOLTA", _endDate, _selectDateRange),
               ],
             ),
             const SizedBox(height: 40),
@@ -182,10 +216,10 @@ class _TripPlannerPageState extends State<TripPlannerPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text("CUSTOS & PARCEIROS", style: TextStyle(color: AppColors.chineseWhite, fontSize: 12, fontWeight: FontWeight.bold)),
+                const Text("ITENS DO ROTEIRO", style: TextStyle(color: AppColors.chineseWhite, fontSize: 12, fontWeight: FontWeight.bold)),
                 GestureDetector(
                   onTap: _showAddItemModal,
-                  child: const Text("+ Adicionar", style: TextStyle(color: AppColors.white, fontWeight: FontWeight.bold)),
+                  child: const Text("+ Adicionar Oferta", style: TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
@@ -194,49 +228,92 @@ class _TripPlannerPageState extends State<TripPlannerPage> {
             if (_plannedItems.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(20.0),
-                child: Center(child: Text("Adicione itens para ver a mágica da economia.", textAlign: TextAlign.center, style: TextStyle(color: AppColors.chineseWhite))),
+                child: Center(child: Text("Adicione ofertas do app para montar seu orçamento.", textAlign: TextAlign.center, style: TextStyle(color: AppColors.chineseWhite))),
               )
             else
-              ...groupedList.map((item) => Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: AppColors.eerieBlack, borderRadius: BorderRadius.circular(12)),
-                child: Row(
-                  children: [
-                    Icon(item['icon'], color: AppColors.chineseWhite, size: 18),
-                    const SizedBox(width: 12),
-                    if (item['qty'] > 1)
-                      Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(color: AppColors.white, borderRadius: BorderRadius.circular(4)),
-                        child: Text("${item['qty']}x", style: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 12)),
+              // --- LISTA AGRUPADA ---
+              ...groupedList.map((item) {
+                // Cálculos do GRUPO
+                double unitOriginal = (item['original_price'] ?? item['price'] ?? 0.0).toDouble();
+                double unitFinal = (item['price'] ?? 0.0).toDouble();
+                int qty = item['qty'];
+                
+                double totalOriginalGroup = unitOriginal * qty;
+                double totalFinalGroup = unitFinal * qty;
+                double totalDiscountGroup = (item['discount'] ?? 0.0) * qty;
+                
+                // Chave para remoção (Nome)
+                String itemName = item['name'].toString();
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: AppColors.eerieBlack, borderRadius: BorderRadius.circular(12)),
+                  child: Row(
+                    children: [
+                      // BADGE 2x (Branco e Preto)
+                      if (qty > 1)
+                        Container(
+                          margin: const EdgeInsets.only(right: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(color: AppColors.white, borderRadius: BorderRadius.circular(6)),
+                          child: Text("${qty}x", style: const TextStyle(color: AppColors.black, fontWeight: FontWeight.w900, fontSize: 12)),
+                        ),
+
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(item['store_name'] ?? 'Oferta', style: const TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.bold)),
+                            Text(item['name'], style: const TextStyle(color: AppColors.white, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
                       ),
-                    Expanded(child: Text(item['name'], style: const TextStyle(color: AppColors.white))),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text("R\$ ${(item['price'] * item['qty']).toStringAsFixed(0)}", style: const TextStyle(color: AppColors.white)),
-                        if (item['discount'] > 0)
-                          Text("- R\$ ${(item['discount'] * item['qty']).toStringAsFixed(0)}", style: const TextStyle(color: Colors.greenAccent, fontSize: 10)),
-                      ],
-                    ),
-                    const SizedBox(width: 12),
-                    GestureDetector(
-                      onTap: () => _removeOneItem(item['name']),
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(border: Border.all(color: Colors.redAccent.withOpacity(0.5)), shape: BoxShape.circle),
-                        child: const Icon(Icons.remove, color: Colors.redAccent, size: 16),
+                      
+                      // COLUNA DE PREÇOS (O que você pediu!)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          // Original Riscado
+                          if (totalDiscountGroup > 0)
+                            Text("R\$ ${totalOriginalGroup.toStringAsFixed(0)}", style: TextStyle(color: AppColors.chineseWhite.withOpacity(0.5), fontSize: 11, decoration: TextDecoration.lineThrough)),
+                          
+                          // Preço Final
+                          Text("R\$ ${totalFinalGroup.toStringAsFixed(0)}", style: const TextStyle(color: AppColors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                          
+                          // Desconto Verde
+                          if (totalDiscountGroup > 0)
+                            Text("- R\$ ${totalDiscountGroup.toStringAsFixed(0)}", style: const TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                        ],
                       ),
-                    )
-                  ],
-                ),
-              )),
+                      
+                      const SizedBox(width: 12),
+                      
+                      // Botão Remover
+                      GestureDetector(
+                        onTap: () => _removeOneInstance(itemName),
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
+                            shape: BoxShape.circle
+                          ),
+                          child: const Icon(Icons.remove, color: Colors.redAccent, size: 16),
+                        ),
+                      )
+                    ],
+                  ),
+                );
+              }),
 
             const SizedBox(height: 40),
 
-            BudgetSummaryCard(totalCost: totalCost, totalSavings: totalSavings),
+            // Card de Resumo
+            BudgetSummaryCard(
+              totalOriginal: totalOriginal,
+              totalDiscount: totalSavings,
+              totalFinal: totalFinal,
+            ),
 
             const SizedBox(height: 32),
             
@@ -244,6 +321,7 @@ class _TripPlannerPageState extends State<TripPlannerPage> {
               width: double.infinity,
               child: CustomButton(
                 text: 'SALVAR ROTEIRO',
+                isLoading: _isSaving,
                 onPressed: _saveTrip,
               ),
             )
@@ -262,7 +340,10 @@ class _TripPlannerPageState extends State<TripPlannerPage> {
           children: [
             Text(label, style: const TextStyle(color: AppColors.chineseWhite, fontSize: 10, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
-            Text(date == null ? "--/--" : "${date.day}/${date.month}/${date.year}", style: const TextStyle(color: AppColors.white, fontSize: 16)),
+            Text(
+              date == null ? "--/--" : "${date.day}/${date.month}/${date.year}", 
+              style: const TextStyle(color: AppColors.white, fontSize: 16)
+            ),
           ],
         ),
       ),

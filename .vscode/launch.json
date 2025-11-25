@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "app_v7_web",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "args": [
+                "--dart-define=SUPABASE_URL=https://qluygiurpfqcbphyojii.supabase.co/",
+                "--dart-define=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFsdXlnaXVycGZxY2JwaHlvamlpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQwMzEwNDUsImV4cCI6MjA3OTYwNzA0NX0.csABsSigbhzJFbGUzRMKFQRc0EyimuMbdAhFY45FvC",
+                "--dart-define=GOOGLE_MAPS_API_KEY_WEB=AIzaSyAOQPekyigUZg6tkfcENcqoXyBDMvVM2bY"
+            ]
+        }
+    ]
+}

@@ -1,25 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:loading_animation_widget/loading_animation_widget.dart';
 import '../theme/app_colors.dart';
 import '../components/profile_header.dart';
-import '../components/savings_card.dart';
-import '../components/favorite_tile.dart';
 import '../components/custom_button.dart';
 import 'login_page.dart';
 import 'subscription_page.dart';
-import '../components/subscription_management_modal.dart';
-import 'all_favorite_stores_page.dart';
-import 'all_favorite_deals_page.dart';
-import '../components/stores/store_modal.dart';
-import '../components/deal_modal.dart';
 
 class ProfilePage extends StatefulWidget {
   final bool isVip;
   final Function(bool) onVipStatusChanged;
 
   const ProfilePage({
-    super.key, 
-    required this.isVip, 
+    super.key,
+    required this.isVip,
     required this.onVipStatusChanged,
   });
 
@@ -28,137 +22,116 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  String _userName = 'Nathan Rodrigues Cardoso';
-  String _userEmail = 'gabriel@monochromia.com';
+  final _supabase = Supabase.instance.client;
+  bool _isLoading = true;
+  
+  Map<String, dynamic>? _profile;
+  int _tripsCount = 0;
+  double _totalSavings = 0.0;
 
-  // --- DADOS ---
-  final List<Map<String, dynamic>> _favStores = [
-    {
-      'name': 'Outback', 'category': 'Gastronomia', 'rating': 4.8, 
-      'img': 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?q=80&w=500&auto=format&fit=crop',
-      'lat': -22.9820, 'lng': -43.2177 
-    },
-    {
-      'name': 'Nike Store', 'category': 'Moda', 'rating': 4.9,
-      'img': 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=500&auto=format&fit=crop',
-      'lat': -23.0005, 'lng': -43.3315 
-    },
-    {
-      'name': 'Zara', 'category': 'Moda', 'rating': 4.7,
-      'img': 'https://images.unsplash.com/photo-1445205170230-053b83016050?q=80&w=500&auto=format&fit=crop',
-      'lat': -22.9515, 'lng': -43.1845 
-    },
-    {
-      'name': 'Apple', 'category': 'Tech', 'rating': 5.0,
-      'img': 'https://images.unsplash.com/photo-1519389950473-47ba0277781c?q=80&w=500&auto=format&fit=crop',
-      'lat': -22.9997, 'lng': -43.3505 
-    },
-  ];
-
-  final List<Map<String, dynamic>> _favDeals = [
-    {
-      'name': 'Burger King', 'offer': 'Combo 50% OFF', 'location': 'Centro',
-      'img': 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?q=80&w=500&auto=format&fit=crop',
-      'lat': -22.9035, 'lng': -43.1735 
-    },
-    {
-      'name': 'Hotel Ibis', 'offer': 'R\$ 80,00 OFF', 'location': 'Copacabana',
-      'img': 'https://images.unsplash.com/photo-1566073771259-6a8506099945?q=80&w=500&auto=format&fit=crop',
-      'lat': -22.9698, 'lng': -43.1869 
-    },
-    {
-      'name': 'Adidas', 'offer': 'Tênis 30% OFF', 'location': 'Barra Shopping',
-      'img': 'https://images.unsplash.com/photo-1511556532299-8f662fc26c06?q=80&w=500&auto=format&fit=crop',
-      'lat': -22.9230, 'lng': -43.2350 
-    },
-  ];
-
-  void _showSnackBar(String msg, {IconData icon = Icons.info_outline}) {
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: AppColors.white,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        elevation: 6,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        content: Row(
-          children: [
-            Icon(icon, color: AppColors.black, size: 20),
-            const SizedBox(width: 12),
-            Expanded(child: Text(msg, style: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 14))),
-          ],
-        ),
-        duration: const Duration(seconds: 3),
-      ),
-    );
+  @override
+  void initState() {
+    super.initState();
+    _fetchProfileData();
   }
 
-  void _showEditProfileModal() {
-    final nameController = TextEditingController(text: _userName);
-    final emailController = TextEditingController(text: _userEmail);
+  Future<void> _fetchProfileData() async {
+    try {
+      final session = _supabase.auth.currentSession;
+      final user = _supabase.auth.currentUser;
+      
+      // VERIFICAÇÃO 1: Usuário está logado?
+      if (session == null || user == null) {
+        print("DEBUG: Usuário não logado. Redirecionando...");
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pushReplacement(
+            MaterialPageRoute(builder: (context) => const LoginPage()),
+          );
+        }
+        return;
+      }
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
-        decoration: const BoxDecoration(color: AppColors.eerieBlack, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text("Editar Perfil", style: TextStyle(color: AppColors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 24),
-            _buildTextField("Nome", nameController),
-            const SizedBox(height: 16),
-            _buildTextField("Email", emailController),
-            const SizedBox(height: 32),
-            SizedBox(width: double.infinity, child: CustomButton(text: 'SALVAR ALTERAÇÕES', onPressed: (){ 
-                setState(() { _userName = nameController.text; _userEmail = emailController.text; });
-                Navigator.pop(context);
-                _showSnackBar("Perfil atualizado!", icon: Icons.check_circle);
-            }))
-          ],
-        ),
-      )
-    );
+      print("DEBUG: Buscando perfil para ID: ${user.id}");
+
+      // 1. Busca Perfil (Tenta buscar, se não achar, não quebra)
+      final profileData = await _supabase
+          .from('profiles')
+          .select()
+          .eq('id', user.id)
+          .maybeSingle(); 
+
+      // 2. Busca Estatísticas (Verifica se a coluna existe)
+      final tripsData = await _supabase
+          .from('trips')
+          .select('total_savings')
+          .eq('user_id', user.id); // Filtra só as viagens desse usuário!
+
+      int count = 0;
+      double savings = 0.0;
+      
+      if (tripsData != null) {
+        final list = List<Map<String, dynamic>>.from(tripsData);
+        count = list.length;
+        for (var t in list) {
+          // Proteção contra valor nulo no banco
+          savings += (t['total_savings'] as num?)?.toDouble() ?? 0.0;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          // Se não achou perfil no banco, cria um "falso" na memória para exibir
+          _profile = profileData ?? {
+            'full_name': user.userMetadata?['full_name'] ?? 'Viajante',
+            'email': user.email,
+            'is_vip': false,
+            'avatar_url': null,
+          };
+          
+          _tripsCount = count;
+          _totalSavings = savings;
+          _isLoading = false;
+          
+          // Sincroniza VIP
+          if (_profile?['is_vip'] == true && !widget.isVip) {
+            widget.onVipStatusChanged(true);
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint("ERRO CRÍTICO NO PERFIL: $e");
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Erro ao carregar dados: $e"),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
   }
 
-  void _handlePhotoClick() { _showSnackBar("Abrir galeria de fotos...", icon: Icons.camera_alt); }
-  void _handleLogout() { Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (context) => const LoginPage()), (route) => false); }
-
-  Widget _buildTextField(String label, TextEditingController controller) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(color: AppColors.chineseWhite, fontSize: 12, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(color: AppColors.black, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.nightRider)),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: TextField(controller: controller, style: const TextStyle(color: AppColors.white), decoration: const InputDecoration(border: InputBorder.none)),
-        )
-      ],
-    );
-  }
-
-  Widget _buildSectionHeader(String title, VoidCallback onViewMore) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(title, style: const TextStyle(color: AppColors.chineseWhite, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-        GestureDetector(
-          onTap: onViewMore,
-          child: const Text("Ver mais", style: TextStyle(color: AppColors.white, fontSize: 12, fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
-        ),
-      ],
-    );
+  Future<void> _handleLogout() async {
+    await _supabase.auth.signOut();
+    if (mounted) {
+      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const LoginPage()),
+        (route) => false,
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: AppColors.black,
+        body: Center(child: LoadingAnimationWidget.staggeredDotsWave(color: Colors.white, size: 40)),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.black,
       body: SafeArea(
@@ -167,113 +140,122 @@ class _ProfilePageState extends State<ProfilePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Center(child: ProfileHeader(name: _userName, email: _userEmail, imageUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=500&auto=format&fit=crop', onEditTap: _showEditProfileModal, onPhotoTap: _handlePhotoClick)),
-              
-              const SizedBox(height: 40),
-              const SavingsCard(amount: 350.00),
+              const Text(
+                "Meu Perfil",
+                style: TextStyle(color: AppColors.white, fontSize: 32, fontWeight: FontWeight.w900),
+              ),
               const SizedBox(height: 24),
+
+              ProfileHeader(
+                fullName: _profile?['full_name'] ?? "Usuário",
+                email: _profile?['email'] ?? "...",
+                isVip: widget.isVip,
+                avatarUrl: _profile?['avatar_url'],
+              ),
+
+              const SizedBox(height: 32),
+
+              Row(
+                children: [
+                  _buildStatCard("Viagens", "$_tripsCount", Icons.flight_takeoff),
+                  const SizedBox(width: 16),
+                  _buildStatCard("Economia", "R\$ ${_totalSavings.toStringAsFixed(0)}", Icons.savings, isGreen: true),
+                ],
+              ),
+
+              const SizedBox(height: 40),
+              const Text("CONFIGURAÇÕES", style: TextStyle(color: AppColors.chineseWhite, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+              const SizedBox(height: 16),
+
+              _buildMenuItem(
+                icon: Icons.card_membership,
+                text: widget.isVip ? "Gerenciar Assinatura" : "Seja VIP Agora",
+                isHighlight: !widget.isVip,
+                onTap: () {
+                   Navigator.push(context, MaterialPageRoute(builder: (context) => const SubscriptionPage()));
+                },
+              ),
+              
+              _buildMenuItem(icon: Icons.favorite_border, text: "Meus Favoritos", onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Em breve!")));
+              }),
+              
+              _buildMenuItem(icon: Icons.settings_outlined, text: "Dados da Conta", onTap: () {
+                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Em breve!")));
+              }),
+
+              const SizedBox(height: 40),
 
               SizedBox(
                 width: double.infinity,
                 child: CustomButton(
-                  text: widget.isVip ? 'GERENCIAR ASSINATURA' : 'SEJA VIP AGORA',
-                  isOutlined: true,
-                  textColor: widget.isVip ? Colors.greenAccent : AppColors.white,
-                  icon: FontAwesomeIcons.crown,
-                  onPressed: () async {
-                    if (!widget.isVip) {
-                      final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => const SubscriptionPage()));
-                      if (result == true) {
-                        widget.onVipStatusChanged(true);
-                        _showSnackBar("Bem-vindo ao Clube VIP!", icon: FontAwesomeIcons.crown);
-                      }
-                    } else {
-                      showModalBottomSheet(
-                        context: context,
-                        backgroundColor: Colors.transparent,
-                        builder: (context) => SubscriptionManagementModal(
-                          onCancelSubscription: () {
-                            widget.onVipStatusChanged(false);
-                            _showSnackBar("Assinatura cancelada. Sentiremos sua falta!", icon: Icons.sentiment_dissatisfied);
-                          },
-                        ),
-                      );
-                    }
-                  },
+                  text: 'SAIR DA CONTA',
+                  backgroundColor: Colors.transparent,
+                  borderColor: Colors.redAccent,
+                  textColor: Colors.redAccent,
+                  onPressed: _handleLogout,
                 ),
               ),
-
-              const SizedBox(height: 40),
-
-              // --- 1. LOJAS PREFERIDAS ---
-              _buildSectionHeader("LOJAS PREFERIDAS", () {
-                Navigator.push(context, MaterialPageRoute(builder: (context) => AllFavoriteStoresPage(stores: _favStores)));
-              }),
-              const SizedBox(height: 16),
-              // CORREÇÃO AQUI: Passando 'allStores: _favStores'
-              ..._favStores.take(3).map((item) => FavoriteTile(
-                item: item,
-                onTap: () {
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (context) => StoreModal(
-                      store: item, 
-                      allStores: _favStores // <--- CORREÇÃO
-                    ),
-                  );
-                },
-              )).toList(),
-
-              const SizedBox(height: 40),
-
-              // --- 2. PROMOÇÕES PREFERIDAS ---
-              _buildSectionHeader("PROMOÇÕES PREFERIDAS", () {
-                Navigator.push(context, MaterialPageRoute(builder: (context) => AllFavoriteDealsPage(deals: _favDeals)));
-              }),
-              const SizedBox(height: 16),
-              ..._favDeals.take(3).map((item) => FavoriteTile(
-                item: item,
-                onTap: () {
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (context) => DealModal(
-                      item: item,
-                      isFavorite: true,
-                      onFavoriteToggle: () {}, 
-                    ),
-                  );
-                },
-              )).toList(),
-
-              const SizedBox(height: 40),
               
-              SizedBox(width: double.infinity, child: CustomButton(text: 'ALTERAR SENHA', isOutlined: true, icon: Icons.lock_outline, onPressed: () => _showSnackBar("Email de redefinição enviado!", icon: Icons.email))),
-              const SizedBox(height: 16),
-              SizedBox(width: double.infinity, child: CustomButton(text: 'SAIR DA CONTA', isOutlined: true, icon: Icons.logout, onPressed: _handleLogout)),
-              
-              const SizedBox(height: 30),
-              Center(
-                child: Column(
-                  children: [
-                    Text("Versão 1.0.0", style: TextStyle(color: const Color.fromARGB(255, 255, 255, 255).withOpacity(0.5), fontSize: 10)),
-                    const SizedBox(height: 4),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        Text("Powered by ", style: TextStyle(color: AppColors.chineseWhite, fontSize: 12)),
-                        Text("NEXIT", style: TextStyle(color: AppColors.white, fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: 1)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
               const SizedBox(height: 20),
+              const Center(
+                child: Text("Versão 1.0.0", style: TextStyle(color: AppColors.nightRider, fontSize: 12)),
+              ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatCard(String label, String value, IconData icon, {bool isGreen = false}) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppColors.eerieBlack,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: isGreen ? Colors.greenAccent : AppColors.white, size: 24),
+            const SizedBox(height: 12),
+            Text(value, style: TextStyle(color: isGreen ? Colors.greenAccent : AppColors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(label, style: const TextStyle(color: AppColors.chineseWhite, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuItem({required IconData icon, required String text, required VoidCallback onTap, bool isHighlight = false}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+        decoration: BoxDecoration(
+          color: isHighlight ? AppColors.white : AppColors.eerieBlack,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: isHighlight ? AppColors.black : AppColors.white, size: 20),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: isHighlight ? AppColors.black : AppColors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14
+                ),
+              ),
+            ),
+            Icon(Icons.chevron_right, color: isHighlight ? AppColors.black : AppColors.nightRider, size: 20),
+          ],
         ),
       ),
     );

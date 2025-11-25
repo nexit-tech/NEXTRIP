@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import '../theme/app_colors.dart';
-import '../components/custom_input.dart';
-import '../components/custom_button.dart';
-import 'home_page.dart';
-import 'sign_up_page.dart';
-import 'forgot_password_page.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'; // Import Supabase
+import 'package:app_v7_web/theme/app_colors.dart';
+import 'package:app_v7_web/components/custom_input.dart';
+import 'package:app_v7_web/components/custom_button.dart';
+import 'package:app_v7_web/pages/home_page.dart';
+import 'package:app_v7_web/pages/sign_up_page.dart';
+import 'package:app_v7_web/pages/forgot_password_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -15,9 +16,44 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
+  final _supabase = Supabase.instance.client; // Cliente Supabase
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _isLoading = false;
   bool _rememberMe = false;
+
+  Future<void> _handleLogin() async {
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Preencha e-mail e senha.")));
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      // Autenticação Real
+      final AuthResponse res = await _supabase.auth.signInWithPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+
+      if (res.user != null) {
+        if (mounted) {
+          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomePage()));
+        }
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: Colors.redAccent));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Erro inesperado."), backgroundColor: Colors.redAccent));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,17 +68,14 @@ class _LoginPageState extends State<LoginPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // --- AQUI ESTÁ A LOGO NOVA ---
-                  // Certifique-se que o arquivo está em assets/images/
                   Image.asset(
-                    'assets/images/logo_branco.png', // <--- NOME DO ARQUIVO QUE VC SUBIU
-                    height: 100, // Ajuste a altura se ficar muito grande/pequeno
+                    'assets/images/logo_branco.png', 
+                    height: 100,
                     fit: BoxFit.contain,
                   ),
                   
                   const SizedBox(height: 48),
 
-                  // Card de Login
                   Container(
                     padding: const EdgeInsets.all(32),
                     decoration: BoxDecoration(
@@ -97,9 +130,8 @@ class _LoginPageState extends State<LoginPage> {
                           width: double.infinity,
                           child: CustomButton(
                             text: 'ENTRAR',
-                            onPressed: () {
-                              Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomePage()));
-                            },
+                            isLoading: _isLoading,
+                            onPressed: _handleLogin,
                           ),
                         ),
 

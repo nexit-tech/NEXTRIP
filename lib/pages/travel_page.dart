@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import '../theme/app_colors.dart';
-import 'trip_planner_page.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:loading_animation_widget/loading_animation_widget.dart';
+import 'package:app_v7_web/theme/app_colors.dart';
+import 'package:app_v7_web/pages/trip_planner_page.dart';
 
 class TravelPage extends StatefulWidget {
   const TravelPage({super.key});
@@ -11,58 +13,118 @@ class TravelPage extends StatefulWidget {
 }
 
 class _TravelPageState extends State<TravelPage> {
-  
-  // --- LISTA DE VIAGENS (Estado) ---
-  // Começamos com 2 exemplos mockados
-  final List<Map<String, dynamic>> _myTrips = [
-    {
-      'id': '1',
-      'destination': 'Réveillon Copacabana',
-      'startDate': DateTime(2025, 12, 28),
-      'endDate': DateTime(2026, 1, 2),
-      'items': [], // Sem itens pra simplificar o mock
-      'totalCost': 4500.00,
-      'totalSavings': 450.00,
-    },
-    {
-      'id': '2',
-      'destination': 'Férias Disney',
-      'startDate': DateTime(2026, 7, 10),
-      'endDate': DateTime(2026, 7, 20),
-      'items': [],
-      'totalCost': 15000.00,
-      'totalSavings': 1200.00,
-    },
-  ];
+  final _supabase = Supabase.instance.client;
+  List<Map<String, dynamic>> _myTrips = [];
+  bool _isLoading = true;
 
-  // Abre o planejador e espera o resultado (Salvar)
-  Future<void> _openTripPlanner({Map<String, dynamic>? tripToEdit}) async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => TripPlannerPage(tripToEdit: tripToEdit)),
-    );
+  @override
+  void initState() {
+    super.initState();
+    _fetchTrips();
+  }
 
-    if (result != null) {
-      setState(() {
-        // Se estamos editando (já tem ID na lista), atualiza
-        final index = _myTrips.indexWhere((t) => t['id'] == result['id']);
-        if (index != -1) {
-          _myTrips[index] = result;
-        } else {
-          // Se é novo, adiciona
-          _myTrips.add(result);
-        }
-      });
+  Future<void> _fetchTrips() async {
+    try {
+      setState(() => _isLoading = true);
       
-      _showSnackBar("Roteiro salvo com sucesso!", icon: Icons.check_circle);
+      // Busca as viagens ordenadas pela data mais recente
+      final response = await _supabase
+          .from('trips')
+          .select()
+          .order('start_date', ascending: true);
+
+      if (response == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final data = List<Map<String, dynamic>>.from(response);
+      
+      // Conversão de tipos (Banco -> Flutter)
+      final cleanedData = data.map((trip) {
+        return {
+          'id': trip['id'],
+          'destination': trip['destination'],
+          'startDate': DateTime.parse(trip['start_date']),
+          'endDate': DateTime.parse(trip['end_date']),
+          'totalCost': (trip['total_cost'] as num?)?.toDouble() ?? 0.0,
+          'totalSavings': (trip['total_savings'] as num?)?.toDouble() ?? 0.0,
+          // Itens não vêm nessa query inicial, buscamos se precisar editar
+        };
+      }).toList();
+
+      if (mounted) {
+        setState(() {
+          _myTrips = cleanedData;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro trips: $e');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _deleteTrip(Map<String, dynamic> trip) {
-    setState(() {
-      _myTrips.remove(trip);
-    });
-    _showSnackBar("Roteiro removido.", icon: Icons.delete_outline);
+  // Abre o planejador e espera o resultado (Salvar)
+  Future<void> _openTripPlanner({Map<String, dynamic>? tripToEdit}) async {
+    // Se for editar, precisamos buscar os ITENS dessa viagem antes de abrir
+    Map<String, dynamic>? fullTripData;
+    
+    if (tripToEdit != null) {
+      try {
+        // Busca os itens da viagem no banco
+        final itemsResponse = await _supabase
+            .from('trip_items')
+            .select()
+            .eq('trip_id', tripToEdit['id']);
+            
+        final itemsList = (itemsResponse as List).map((item) {
+          return {
+            'id': item['id'],
+            'name': item['name'],
+            'category': item['category'],
+            'price': (item['price'] as num).toDouble(),
+            'discount': (item['discount'] as num).toDouble(),
+            'qty': item['qty'] ?? 1,
+            // Recupera o ícone pelo código salvo
+            'icon': IconData(item['icon_code'] ?? 57563, fontFamily: 'MaterialIcons'),
+          };
+        }).toList();
+
+        fullTripData = {
+          ...tripToEdit,
+          'items': itemsList,
+        };
+      } catch (e) {
+        debugPrint("Erro ao carregar itens: $e");
+      }
+    }
+
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TripPlannerPage(tripToEdit: fullTripData),
+      ),
+    );
+
+    // Se voltou com 'true', significa que salvou algo, então recarrega tudo
+    if (result == true) {
+      _fetchTrips();
+      _showSnackBar("Roteiro atualizado com sucesso!", icon: Icons.check_circle);
+    }
+  }
+
+  void _deleteTrip(String id) async {
+    try {
+      await _supabase.from('trips').delete().eq('id', id);
+      
+      setState(() {
+        _myTrips.removeWhere((t) => t['id'] == id);
+      });
+      _showSnackBar("Roteiro removido.", icon: Icons.delete_outline);
+    } catch (e) {
+      _showSnackBar("Erro ao remover.", icon: Icons.error);
+    }
   }
 
   void _showSnackBar(String msg, {IconData icon = Icons.info_outline}) {
@@ -81,7 +143,6 @@ class _TravelPageState extends State<TravelPage> {
             Expanded(child: Text(msg, style: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 14))),
           ],
         ),
-        duration: const Duration(seconds: 3),
       ),
     );
   }
@@ -121,19 +182,21 @@ class _TravelPageState extends State<TravelPage> {
 
               // LISTA DE VIAGENS
               Expanded(
-                child: _myTrips.isEmpty
-                    ? const Center(child: Text("Nenhuma viagem planejada.", style: TextStyle(color: Colors.grey)))
-                    : ListView.builder(
-                        itemCount: _myTrips.length,
-                        itemBuilder: (context, index) {
-                          return _buildTripCard(_myTrips[index]);
-                        },
-                      ),
+                child: _isLoading 
+                  ? Center(child: LoadingAnimationWidget.staggeredDotsWave(color: Colors.white, size: 40))
+                  : _myTrips.isEmpty
+                      ? const Center(child: Text("Nenhuma viagem planejada.\nClique em 'Criar Nova'!", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)))
+                      : ListView.builder(
+                          itemCount: _myTrips.length,
+                          itemBuilder: (context, index) {
+                            return _buildTripCard(_myTrips[index]);
+                          },
+                        ),
               ),
 
               // Botão Criar Novo
               GestureDetector(
-                onTap: () => _openTripPlanner(), // Cria novo
+                onTap: () => _openTripPlanner(), 
                 child: Container(
                   height: 80,
                   width: double.infinity,
@@ -161,13 +224,12 @@ class _TravelPageState extends State<TravelPage> {
   }
 
   Widget _buildTripCard(Map<String, dynamic> trip) {
-    // Formata datas
     final start = trip['startDate'] as DateTime;
     final end = trip['endDate'] as DateTime;
     final dateStr = "${start.day}/${start.month} - ${end.day}/${end.month}/${end.year}";
 
     return GestureDetector(
-      onTap: () => _openTripPlanner(tripToEdit: trip), // Abre para editar
+      onTap: () => _openTripPlanner(tripToEdit: trip),
       child: Container(
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(20),
@@ -190,7 +252,6 @@ class _TravelPageState extends State<TravelPage> {
                   const SizedBox(height: 4),
                   Text(dateStr, style: const TextStyle(color: Colors.grey, fontSize: 12)),
                   
-                  // --- NOVO: MOSTRA CUSTO TOTAL ---
                   const SizedBox(height: 8),
                   Text(
                     "Custo: R\$ ${trip['totalCost'].toStringAsFixed(0)}",
@@ -202,17 +263,19 @@ class _TravelPageState extends State<TravelPage> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                // Botão de Deletar discreto
+                // Botão de Deletar
                 GestureDetector(
-                  onTap: () => _deleteTrip(trip),
-                  child: const Padding(
-                    padding: EdgeInsets.only(bottom: 8.0, left: 8.0),
-                    child: Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                  onTap: () => _deleteTrip(trip['id']),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    color: Colors.transparent, // Aumenta área de toque
+                    child: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
                   ),
                 ),
+                const SizedBox(height: 4),
                 const Text("Economia", style: TextStyle(color: Colors.grey, fontSize: 10)),
                 Text(
-                  "R\$ ${trip['totalSavings'].toStringAsFixed(0)} off", 
+                  "R\$ ${trip['totalSavings'].toStringAsFixed(0)}", 
                   style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 14)
                 ),
               ],

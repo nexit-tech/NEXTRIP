@@ -5,11 +5,13 @@ import '../../theme/app_colors.dart';
 class DealsGrid extends StatelessWidget {
   final List<Map<String, dynamic>> deals;
   final Function(Map<String, dynamic>) onDealTap;
+  final Function(Map<String, dynamic>) onFavoriteToggle;
 
   const DealsGrid({
     super.key,
     required this.deals,
     required this.onDealTap,
+    required this.onFavoriteToggle,
   });
 
   @override
@@ -37,7 +39,7 @@ class DealsGrid extends StatelessWidget {
           crossAxisCount: 2,
           mainAxisSpacing: 20,
           crossAxisSpacing: 16,
-          childAspectRatio: 0.72,
+          childAspectRatio: 0.65, 
         ),
       ),
     );
@@ -63,45 +65,86 @@ class DealsGrid extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (item['isFavorite'])
-                  const Positioned(
-                    top: 8,
-                    right: 8,
-                    child: CircleAvatar(
-                      backgroundColor: AppColors.black,
-                      radius: 12,
-                      child: Icon(Icons.favorite, color: Color.fromARGB(255, 255, 255, 255), size: 14),
+                
+                // Badge de Desconto (Esquerda)
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.green,
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                  )
+                    child: Text(
+                      item['offer'], 
+                      style: const TextStyle(
+                        color: Colors.white, 
+                        fontSize: 10, 
+                        fontWeight: FontWeight.bold
+                      ),
+                    ),
+                  ),
+                ),
+
+                // --- CORAÇÃO SEMPRE BRANCO (Direita) ---
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: IconButton(
+                    onPressed: () => onFavoriteToggle(item),
+                    icon: Icon(
+                      item['isFavorite'] ? Icons.favorite : Icons.favorite_border,
+                      // AQUI ESTAVA O "ERRO": Tirei a condição de cor. Agora é sempre branco.
+                      color: Colors.white, 
+                      size: 22,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 12),
-          Text(item['name'],
-              style: const TextStyle(
-                  color: AppColors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          
+          Text(
+            item['store_name']?.toUpperCase() ?? 'PARCEIRO',
+            style: TextStyle(
+                color: AppColors.chineseWhite.withOpacity(0.6),
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1),
+          ),
           const SizedBox(height: 4),
+          
+          Text(
+            item['name'],
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                color: AppColors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          
           Row(
             children: [
-              const Icon(FontAwesomeIcons.tag, size: 12, color: AppColors.white),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(item['offer'],
-                        style: const TextStyle(
-                            color: AppColors.chineseWhite, fontSize: 12)),
-                    
-                    // --- CORREÇÃO AQUI: SÓ MOSTRA SE TIVER DISTÂNCIA ---
-                    if (item['distance'] != null) 
-                      Text(item['distance'],
-                          style: TextStyle(
-                              color: AppColors.chineseWhite.withOpacity(0.7),
-                              fontSize: 11)),
-                  ],
+              Text(
+                "R\$ ${item['original_price'].toStringAsFixed(0)}",
+                style: TextStyle(
+                  color: AppColors.chineseWhite.withOpacity(0.5),
+                  fontSize: 12,
+                  decoration: TextDecoration.lineThrough,
+                ),
+              ),
+              const SizedBox(width: 8),
+              
+              Text(
+                "R\$ ${item['final_price'].toStringAsFixed(0)}",
+                style: const TextStyle(
+                  color: Colors.greenAccent,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
             ],

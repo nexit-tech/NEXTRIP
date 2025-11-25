@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'; // Import Supabase
 import '../theme/app_colors.dart';
 import '../components/custom_input.dart';
 import '../components/custom_button.dart';
@@ -14,22 +15,58 @@ class SignUpPage extends StatefulWidget {
 }
 
 class _SignUpPageState extends State<SignUpPage> {
+  final _supabase = Supabase.instance.client;
+  
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
-  // CPF REMOVIDO
   final _dateController = TextEditingController();
   
-  // Senhas
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
   bool _isLoading = false;
 
-  // Estado da Força da Senha
   double _passwordStrength = 0;
   String _strengthText = "";
   Color _strengthColor = AppColors.nightRider;
+
+  // --- FUNÇÃO DO POPUP PADRÃO (Custom SnackBar) ---
+  void _showSnackBar(String msg, {bool isError = false}) {
+    ScaffoldMessenger.of(context).clearSnackBars(); // Limpa anteriores
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: AppColors.white, // Sempre branco para manter o estilo
+        behavior: SnackBarBehavior.floating, // Flutuante
+        margin: const EdgeInsets.all(16),    
+        elevation: 6,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14), 
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        content: Row(
+          children: [
+            // Ícone muda de cor dependendo se é erro ou sucesso
+            Icon(
+              isError ? Icons.error_outline : Icons.check_circle_outline, 
+              color: isError ? Colors.redAccent : Colors.green, 
+              size: 24
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                msg,
+                style: const TextStyle(
+                  color: AppColors.black, // Texto preto para contraste
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14
+                ),
+              ),
+            ),
+          ],
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
 
   void _updatePasswordStrength(String value) {
     double strength = 0;
@@ -60,26 +97,64 @@ class _SignUpPageState extends State<SignUpPage> {
     });
   }
 
-  void _handleSignUp() async {
+  Future<void> _handleSignUp() async {
+    // 1. Validações usando o novo SnackBar
+    if (_nameController.text.isEmpty || _emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      _showSnackBar("Preencha todos os campos obrigatórios.", isError: true);
+      return;
+    }
+
     if (_passwordController.text != _confirmPasswordController.text) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("As senhas não coincidem!", style: TextStyle(color: Colors.black)), backgroundColor: Colors.white));
+      _showSnackBar("As senhas não coincidem!", isError: true);
       return;
     }
 
     if (_passwordStrength < 0.5) {
-       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("A senha é muito fraca.", style: TextStyle(color: Colors.black)), backgroundColor: Colors.white));
+       _showSnackBar("Senha muito fraca. Use letras e números.", isError: true);
       return;
     }
 
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 2));
-    if (mounted) {
-      setState(() => _isLoading = false);
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (context) => const HomePage()),
-        (route) => false,
+
+    try {
+      // 2. Cria o Usuário no Supabase Auth
+      final AuthResponse res = await _supabase.auth.signUp(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+        data: {
+          'full_name': _nameController.text.trim(),
+          'phone': _phoneController.text.trim(),
+          'birth_date': _dateController.text.trim(), // Enviando data de nascimento!
+        },
       );
+
+      if (res.user != null) {
+        if (mounted) {
+          // Sucesso!
+          _showSnackBar("Conta criada com sucesso!");
+          
+          // Pequeno delay para o usuário ver a mensagem antes de mudar de tela
+          await Future.delayed(const Duration(milliseconds: 500));
+
+          if (mounted) {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (context) => const HomePage()),
+              (route) => false,
+            );
+          }
+        }
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        _showSnackBar(e.message, isError: true); // Erro do Supabase
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar("Erro inesperado ao criar conta.", isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -138,7 +213,6 @@ class _SignUpPageState extends State<SignUpPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _label("Nascimento"),
-                          // --- DATA AGORA É DIGITÁVEL ---
                           CustomInput(
                             controller: _dateController, 
                             hint: "DD/MM/AAAA", 
@@ -146,8 +220,8 @@ class _SignUpPageState extends State<SignUpPage> {
                             keyboardType: TextInputType.number,
                             inputFormatters: [
                               FilteringTextInputFormatter.digitsOnly, 
-                              DateInputFormatter(), // Formata sozinho
-                              LengthLimitingTextInputFormatter(10) // DD/MM/AAAA
+                              DateInputFormatter(), 
+                              LengthLimitingTextInputFormatter(10) 
                             ],
                           ),
                         ],
@@ -156,8 +230,6 @@ class _SignUpPageState extends State<SignUpPage> {
                   ],
                 ),
                 
-                // CPF REMOVIDO DAQUI
-
                 const SizedBox(height: 16),
 
                 _label("Senha"),
@@ -243,8 +315,6 @@ class _SignUpPageState extends State<SignUpPage> {
   }
 }
 
-// --- FORMATADORES ---
-
 class PhoneInputFormatter extends TextInputFormatter {
   @override TextEditingValue formatEditUpdate(TextEditingValue o, TextEditingValue n) {
     var t = n.text; if (t.isEmpty) return n; var b = StringBuffer();
@@ -253,12 +323,11 @@ class PhoneInputFormatter extends TextInputFormatter {
   }
 }
 
-// FORMATADOR DE DATA (DD/MM/AAAA)
 class DateInputFormatter extends TextInputFormatter {
   @override TextEditingValue formatEditUpdate(TextEditingValue o, TextEditingValue n) {
     var t = n.text; if (t.isEmpty) return n; var b = StringBuffer();
     for (int i = 0; i < t.length; i++) { 
-      if (i==2 || i==4) b.write('/'); // Adiciona barra
+      if (i==2 || i==4) b.write('/'); 
       b.write(t[i]); 
     }
     return n.copyWith(text: b.toString(), selection: TextSelection.collapsed(offset: b.length));

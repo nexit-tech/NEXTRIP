@@ -3,23 +3,35 @@ import '../theme/app_colors.dart';
 import 'custom_button.dart';
 
 class FilterModal extends StatefulWidget {
-  final Function(String) onApply; // <--- NOVO: Função de callback
+  final Function(String) onApply;
+  final List<String>? options; // <--- Agora aceita opções personalizadas
 
-  const FilterModal({super.key, required this.onApply}); // <--- NOVO
+  const FilterModal({
+    super.key, 
+    required this.onApply,
+    this.options, // Opcional
+  });
 
   @override
   State<FilterModal> createState() => _FilterModalState();
 }
 
 class _FilterModalState extends State<FilterModal> {
-  String _selectedSort = 'Relevância'; 
+  String _selectedSort = ''; 
+  late List<String> _sortOptions;
 
-  final List<String> _sortOptions = [
-    'Relevância',
-    'Menor Distância',
-    'Maior Desconto',
-    'Populares'
-  ];
+  @override
+  void initState() {
+    super.initState();
+    // Se passar opções, usa elas. Se não, usa o padrão da Home.
+    _sortOptions = widget.options ?? [
+      'Relevância',
+      'Menor Distância',
+      'Maior Desconto',
+      'Populares'
+    ];
+    _selectedSort = _sortOptions.first;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -68,7 +80,7 @@ class _FilterModalState extends State<FilterModal> {
             width: double.infinity,
             child: CustomButton(
               text: 'APLICAR FILTROS',
-              onPressed: () => widget.onApply(_selectedSort), // <--- CHAMA A FUNÇÃO
+              onPressed: () => widget.onApply(_selectedSort),
             ),
           ),
           const SizedBox(height: 20),

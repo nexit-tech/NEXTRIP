@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:loading_animation_widget/loading_animation_widget.dart';
 import '../../theme/app_colors.dart';
 import '../custom_button.dart';
+import '../filter_modal.dart'; // Import do Modal de Filtro
 
 class PartnerSelectionModal extends StatefulWidget {
   final Function(List<Map<String, dynamic>>) onPartnersSelected;
@@ -13,52 +15,147 @@ class PartnerSelectionModal extends StatefulWidget {
 }
 
 class _PartnerSelectionModalState extends State<PartnerSelectionModal> {
-  String _searchQuery = '';
-  String _selectedCategory = 'Todos';
+  final _supabase = Supabase.instance.client;
   
-  // Lista de itens selecionados (Pode ter repetidos)
-  final List<Map<String, dynamic>> _selectedItems = [];
+  String _searchQuery = '';
+  String _selectedCategory = 'Todas';
+  String _sortOption = 'Relevância';
+  
+  List<Map<String, dynamic>> _allDeals = [];
+  List<Map<String, dynamic>> _selectedItems = [];
+  bool _isLoading = true;
 
-  // Base de Dados
-  final List<Map<String, dynamic>> _allPartners = [
-    {'name': 'Jantar no Outback', 'category': 'Alimentação', 'price': 150.0, 'discount': 30.0, 'icon': Icons.restaurant},
-    {'name': 'Café Starbucks', 'category': 'Alimentação', 'price': 40.0, 'discount': 10.0, 'icon': Icons.local_cafe},
-    {'name': 'Burger King Combo', 'category': 'Alimentação', 'price': 35.0, 'discount': 15.0, 'icon': FontAwesomeIcons.burger},
-    {'name': 'Hotel Ibis Diária', 'category': 'Hospedagem', 'price': 250.0, 'discount': 50.0, 'icon': Icons.hotel},
-    {'name': 'Resort All Inclusive', 'category': 'Hospedagem', 'price': 1200.0, 'discount': 200.0, 'icon': FontAwesomeIcons.umbrellaBeach},
-    {'name': 'Airbnb Apartamento', 'category': 'Hospedagem', 'price': 400.0, 'discount': 0.0, 'icon': Icons.home},
-    {'name': 'Tênis na Nike', 'category': 'Compras', 'price': 600.0, 'discount': 100.0, 'icon': FontAwesomeIcons.shoePrints},
-    {'name': 'Roupas na Reserva', 'category': 'Compras', 'price': 400.0, 'discount': 50.0, 'icon': FontAwesomeIcons.tshirt},
-    {'name': 'Look na Zara', 'category': 'Compras', 'price': 350.0, 'discount': 30.0, 'icon': FontAwesomeIcons.bagShopping},
-    {'name': 'Uber para Aeroporto', 'category': 'Transporte', 'price': 80.0, 'discount': 5.0, 'icon': Icons.directions_car},
-    {'name': 'Aluguel de Carro', 'category': 'Transporte', 'price': 180.0, 'discount': 40.0, 'icon': FontAwesomeIcons.car},
-  ];
+  // Começa com 'Todas' e será preenchida dinamicamente
+  List<String> _categories = ['Todas']; 
 
-  List<Map<String, dynamic>> get _filteredPartners {
-    return _allPartners.where((item) {
-      final matchesSearch = item['name'].toString().toLowerCase().contains(_searchQuery.toLowerCase());
-      final matchesCategory = _selectedCategory == 'Todos' || item['category'] == _selectedCategory;
-      return matchesSearch && matchesCategory;
-    }).toList();
+  @override
+  void initState() {
+    super.initState();
+    _fetchDeals();
   }
 
-  // Adiciona um item à lista
+  Future<void> _fetchDeals() async {
+    try {
+      final response = await _supabase
+          .from('deals')
+          .select('*, stores(name, category, rating)') 
+          .eq('is_active', true);
+
+      if (response == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final data = List<Map<String, dynamic>>.from(response);
+      
+      final cleanedData = data.map((item) {
+        final store = item['stores'] as Map<String, dynamic>? ?? {};
+        
+        double original = (item['original_price'] as num).toDouble();
+        double discountVal = (item['discount_value'] as num).toDouble();
+        String type = item['discount_type'];
+        
+        double finalPrice = 0.0;
+        double savings = 0.0;
+
+        if (type == 'percentage') {
+          savings = original * (discountVal / 100);
+          finalPrice = original - savings;
+        } else {
+          savings = discountVal;
+          finalPrice = original - savings;
+        }
+
+        return {
+          'id': item['id'],
+          'name': item['title'],
+          'store_name': store['name'],
+          'category': store['category'] ?? 'Geral',
+          'rating': (store['rating'] as num?)?.toDouble() ?? 0.0,
+          'price': finalPrice,
+          'original_price': original,
+          'discount': savings,
+          'qty': 1,
+        };
+      }).toList();
+
+      // --- EXTRAI AS CATEGORIAS ÚNICAS ---
+      final Set<String> uniqueCats = {'Todas'};
+      for (var item in cleanedData) {
+        if (item['category'] != null && item['category'].toString().isNotEmpty) {
+          uniqueCats.add(item['category']);
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _allDeals = cleanedData;
+          _categories = uniqueCats.toList();
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Erro deals: $e");
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  List<Map<String, dynamic>> get _filteredDeals {
+    // 1. Filtro de Categoria
+    var list = _selectedCategory == 'Todas'
+        ? _allDeals
+        : _allDeals.where((i) => i['category'] == _selectedCategory).toList();
+
+    // 2. Filtro de Texto
+    if (_searchQuery.isNotEmpty) {
+      final search = _searchQuery.toLowerCase();
+      list = list.where((item) =>
+          item['name'].toString().toLowerCase().contains(search) ||
+          item['store_name'].toString().toLowerCase().contains(search)).toList();
+    }
+
+    // 3. Ordenação
+    List<Map<String, dynamic>> sortedList = List.from(list);
+
+    if (_sortOption == 'Maior Desconto') {
+      sortedList.sort((a, b) => b['discount'].compareTo(a['discount']));
+    } else if (_sortOption == 'Menor Preço') {
+      sortedList.sort((a, b) => a['price'].compareTo(b['price']));
+    } else if (_sortOption == 'Populares') {
+      sortedList.sort((a, b) => b['rating'].compareTo(a['rating']));
+    }
+
+    return sortedList;
+  }
+
   void _addItem(Map<String, dynamic> item) {
     setState(() {
-      _selectedItems.add(item);
+      _selectedItems.add(Map<String, dynamic>.from(item));
     });
   }
 
-  // Remove UMA instância do item da lista
-  void _removeItem(Map<String, dynamic> item) {
+  void _removeItem(String id) {
     setState(() {
-      _selectedItems.remove(item); // Remove a primeira ocorrência encontrada
+      final index = _selectedItems.indexWhere((i) => i['id'] == id);
+      if (index != -1) _selectedItems.removeAt(index);
     });
   }
 
-  // Conta quantos desse item temos na lista
-  int _getItemCount(Map<String, dynamic> item) {
-    return _selectedItems.where((i) => i == item).length;
+  int _getItemCount(String id) {
+    return _selectedItems.where((i) => i['id'] == id).length;
+  }
+
+  void _showSortModal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => FilterModal(
+        onApply: (selectedSort) {
+          Navigator.pop(context);
+          setState(() => _sortOption = selectedSort);
+        },
+      ),
+    );
   }
 
   @override
@@ -66,88 +163,120 @@ class _PartnerSelectionModalState extends State<PartnerSelectionModal> {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
     return Container(
-      height: 700 + bottomInset,
+      height: MediaQuery.of(context).size.height * 0.85,
       decoration: const BoxDecoration(
         color: AppColors.eerieBlack,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      child: Stack(
+      padding: EdgeInsets.fromLTRB(0, 0, 0, bottomInset),
+      child: Column(
         children: [
-          Column(
-            children: [
-              const SizedBox(height: 16),
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.nightRider, borderRadius: BorderRadius.circular(2))),
-              
-              const Padding(
-                padding: EdgeInsets.all(20.0),
-                child: Text("Adicionar Parceiros", style: TextStyle(color: AppColors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              ),
+          const SizedBox(height: 16),
+          Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.nightRider, borderRadius: BorderRadius.circular(2))),
+          
+          const Padding(
+            padding: EdgeInsets.all(20.0),
+            child: Text("Adicionar do Clube", style: TextStyle(color: AppColors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          ),
 
-              // Busca
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Container(
-                  height: 50,
-                  decoration: BoxDecoration(
-                    color: AppColors.black,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.nightRider),
-                  ),
-                  child: TextField(
-                    style: const TextStyle(color: AppColors.white),
-                    onChanged: (val) => setState(() => _searchQuery = val),
-                    decoration: const InputDecoration(
-                      hintText: "Buscar (ex: Outback, Hotel...)",
-                      hintStyle: TextStyle(color: Colors.grey),
-                      prefixIcon: Icon(Icons.search, color: Colors.grey),
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(vertical: 14),
+          // --- AQUI ESTÃO OS FILTROS DE VOLTA! ---
+          
+          // 1. Busca + Botão de Ajuste
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    height: 50,
+                    decoration: BoxDecoration(color: AppColors.black, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.nightRider)),
+                    child: TextField(
+                      style: const TextStyle(color: AppColors.white),
+                      onChanged: (val) => setState(() => _searchQuery = val),
+                      decoration: const InputDecoration(
+                        hintText: "Buscar ofertas...",
+                        hintStyle: TextStyle(color: Colors.grey),
+                        prefixIcon: Icon(Icons.search, color: Colors.grey),
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(vertical: 14),
+                      ),
                     ),
                   ),
                 ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // Filtros
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Row(
-                  children: [
-                    _filterChip('Todos'),
-                    _filterChip('Alimentação'),
-                    _filterChip('Hospedagem'),
-                    _filterChip('Compras'),
-                    _filterChip('Transporte'),
-                  ],
+                const SizedBox(width: 12),
+                GestureDetector(
+                  onTap: _showSortModal,
+                  child: Container(
+                    height: 50, width: 50,
+                    decoration: BoxDecoration(
+                      color: AppColors.black,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _sortOption != 'Relevância' ? Colors.green : AppColors.nightRider),
+                    ),
+                    child: Icon(Icons.tune, color: _sortOption != 'Relevância' ? Colors.green : AppColors.white),
+                  ),
                 ),
-              ),
-
-              const SizedBox(height: 16),
-              const Divider(color: AppColors.nightRider, height: 1),
-
-              // Lista
-              Expanded(
-                child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
-                  itemCount: _filteredPartners.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    final item = _filteredPartners[index];
-                    return _buildPartnerItem(item);
-                  },
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
 
-          // BOTÃO CONFIRMAR
+          const SizedBox(height: 16),
+
+          // 2. Categorias Horizontais
+          SizedBox(
+            height: 40,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: _categories.length,
+              itemBuilder: (context, index) {
+                final cat = _categories[index];
+                final isSelected = _selectedCategory == cat;
+                return GestureDetector(
+                  onTap: () => setState(() => _selectedCategory = cat),
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isSelected ? AppColors.white : Colors.transparent,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: isSelected ? AppColors.white : AppColors.nightRider),
+                    ),
+                    child: Text(
+                      cat,
+                      style: TextStyle(
+                        color: isSelected ? AppColors.black : AppColors.chineseWhite,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+          const SizedBox(height: 16),
+          const Divider(color: AppColors.nightRider, height: 1),
+
+          // --- LISTA DE OFERTAS ---
+          Expanded(
+            child: _isLoading
+                ? Center(child: LoadingAnimationWidget.staggeredDotsWave(color: Colors.white, size: 40))
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+                    itemCount: _filteredDeals.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final item = _filteredDeals[index];
+                      return _buildDealItem(item);
+                    },
+                  ),
+          ),
+
           if (_selectedItems.isNotEmpty)
-            Positioned(
-              bottom: 24 + bottomInset,
-              left: 24,
-              right: 24,
+            Padding(
+              padding: const EdgeInsets.all(24.0),
               child: SizedBox(
                 width: double.infinity,
                 child: CustomButton(
@@ -164,149 +293,66 @@ class _PartnerSelectionModalState extends State<PartnerSelectionModal> {
     );
   }
 
-  Widget _buildPartnerItem(Map<String, dynamic> item) {
-    final count = _getItemCount(item);
+  Widget _buildDealItem(Map<String, dynamic> item) {
+    final count = _getItemCount(item['id']);
     final isSelected = count > 0;
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+    return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: isSelected ? AppColors.white : AppColors.black,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isSelected ? AppColors.white : AppColors.nightRider,
-          width: isSelected ? 2 : 1
-        ),
+        border: Border.all(color: isSelected ? AppColors.white : AppColors.nightRider, width: isSelected ? 2 : 1),
       ),
       child: Row(
         children: [
-          // Ícone
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: isSelected ? AppColors.black.withOpacity(0.1) : AppColors.eerieBlack,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(item['icon'], color: isSelected ? AppColors.black : AppColors.white, size: 20),
-          ),
-          const SizedBox(width: 16),
-          
-          // Texto
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  item['name'],
-                  style: TextStyle(
-                    color: isSelected ? AppColors.black : AppColors.white,
-                    fontWeight: FontWeight.bold
-                  )
-                ),
+                Text(item['store_name'], style: TextStyle(color: isSelected ? AppColors.black : Colors.grey, fontSize: 10, fontWeight: FontWeight.bold)),
+                Text(item['name'], style: TextStyle(color: isSelected ? AppColors.black : AppColors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 4),
-                Text(
-                  "Custo: R\$ ${item['price']}",
-                  style: TextStyle(
-                    color: isSelected ? AppColors.black.withOpacity(0.6) : AppColors.chineseWhite,
-                    fontSize: 12
-                  )
-                ),
+                Row(
+                  children: [
+                    Text("R\$ ${item['original_price'].toStringAsFixed(0)}", style: TextStyle(color: isSelected ? Colors.grey : AppColors.chineseWhite.withOpacity(0.5), decoration: TextDecoration.lineThrough, fontSize: 12)),
+                    const SizedBox(width: 8),
+                    Text("R\$ ${item['price'].toStringAsFixed(0)}", style: TextStyle(color: isSelected ? AppColors.black : AppColors.white, fontWeight: FontWeight.w900, fontSize: 14)),
+                  ],
+                )
               ],
             ),
           ),
-
-          // Coluna de Economia
-          if (item['discount'] > 0)
-            Padding(
-              padding: const EdgeInsets.only(right: 12.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text("ECONOMIA", style: TextStyle(color: isSelected ? Colors.grey : Colors.grey, fontSize: 10)),
-                  Text(
-                    "- R\$ ${item['discount']}", 
-                    style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12)
-                  ),
-                ],
+          
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: Colors.green.withOpacity(0.2), borderRadius: BorderRadius.circular(4)),
+                child: Text("Eco: R\$ ${item['discount'].toStringAsFixed(0)}", style: const TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold)),
               ),
-            ),
-            
-          // --- CONTADOR (AQUI ESTÁ A MÁGICA) ---
-          if (!isSelected)
-            // Botão de Adicionar Simples (Se for 0)
-            GestureDetector(
-              onTap: () => _addItem(item),
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.nightRider),
-                ),
-                child: const Icon(Icons.add, color: AppColors.white, size: 16),
-              ),
-            )
-          else
-            // Controlador de Quantidade (Se for > 0)
-            Container(
-              decoration: BoxDecoration(
-                color: AppColors.black, // Contraste preto no fundo branco
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Menos
-                  GestureDetector(
-                    onTap: () => _removeItem(item),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Icon(Icons.remove, color: AppColors.white, size: 14),
-                    ),
+              const SizedBox(height: 8),
+              
+              if (!isSelected)
+                GestureDetector(
+                  onTap: () => _addItem(item),
+                  child: const Icon(Icons.add_circle_outline, color: AppColors.white, size: 28),
+                )
+              else
+                Container(
+                  decoration: BoxDecoration(color: AppColors.black, borderRadius: BorderRadius.circular(20)),
+                  child: Row(
+                    children: [
+                      GestureDetector(onTap: () => _removeItem(item['id']), child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.remove, color: Colors.white, size: 16))),
+                      Text("$count", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      GestureDetector(onTap: () => _addItem(item), child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.add, color: Colors.white, size: 16))),
+                    ],
                   ),
-                  
-                  // Número
-                  Text(
-                    count.toString(), 
-                    style: const TextStyle(color: AppColors.white, fontWeight: FontWeight.bold)
-                  ),
-
-                  // Mais
-                  GestureDetector(
-                    onTap: () => _addItem(item),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Icon(Icons.add, color: AppColors.white, size: 14),
-                    ),
-                  ),
-                ],
-              ),
-            )
+                )
+            ],
+          )
         ],
-      ),
-    );
-  }
-
-  Widget _filterChip(String label) {
-    bool isSelected = _selectedCategory == label;
-    return GestureDetector(
-      onTap: () => setState(() => _selectedCategory = label),
-      child: Container(
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.white : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: isSelected ? AppColors.white : AppColors.nightRider),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? AppColors.black : AppColors.chineseWhite,
-            fontWeight: FontWeight.bold,
-            fontSize: 12,
-          ),
-        ),
       ),
     );
   }

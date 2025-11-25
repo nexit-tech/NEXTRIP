@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
 
 class BudgetSummaryCard extends StatelessWidget {
-  final double totalCost;
-  final double totalSavings;
+  final double totalOriginal;
+  final double totalDiscount;
+  final double totalFinal;
 
   const BudgetSummaryCard({
     super.key,
-    required this.totalCost,
-    required this.totalSavings,
+    required this.totalOriginal,
+    required this.totalDiscount,
+    required this.totalFinal,
   });
 
   @override
@@ -16,8 +18,8 @@ class BudgetSummaryCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: AppColors.white, // Destaque Branco
-        borderRadius: BorderRadius.circular(20),
+        color: AppColors.white, // Card branco para contraste
+        borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.3),
@@ -28,32 +30,54 @@ class BudgetSummaryCard extends StatelessWidget {
       ),
       child: Column(
         children: [
+          // Linha 1: Preço Cheio
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Custo Estimado", style: TextStyle(color: AppColors.black)),
+              const Text("Subtotal", style: TextStyle(color: Colors.grey)),
               Text(
-                "R\$ ${totalCost.toStringAsFixed(2)}",
-                style: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 16),
+                "R\$ ${totalOriginal.toStringAsFixed(2)}",
+                style: const TextStyle(
+                  color: Colors.grey, 
+                  fontWeight: FontWeight.bold,
+                  decoration: TextDecoration.lineThrough
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          
+          const SizedBox(height: 8),
+          
+          // Linha 2: Descontos
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Descontos Aplicados", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+              Text(
+                "- R\$ ${totalDiscount.toStringAsFixed(2)}",
+                style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 16),
           const Divider(color: Colors.grey),
           const SizedBox(height: 12),
+          
+          // Linha 3: Total a Pagar
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                "ECONOMIA VIP",
-                style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                "TOTAL ESTIMADO",
+                style: TextStyle(color: AppColors.black, fontWeight: FontWeight.w900, letterSpacing: 1),
               ),
               Text(
-                "R\$ ${totalSavings.toStringAsFixed(2)}",
+                "R\$ ${totalFinal.toStringAsFixed(2)}",
                 style: const TextStyle(
-                  color: Colors.green,
+                  color: AppColors.black,
                   fontWeight: FontWeight.w900,
-                  fontSize: 22,
+                  fontSize: 24,
                 ),
               ),
             ],
