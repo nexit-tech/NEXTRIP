@@ -1,27 +1,38 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_stripe/flutter_stripe.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+// O pacote universal_html evita erros na web/mobile
+import 'package:universal_html/html.dart' as html;
 
-// Importação apenas para o Google Maps (se necessário)
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
-
-import 'theme/app_colors.dart';
 import 'pages/login_page.dart';
-import 'pages/reset_password_page.dart';
 import 'pages/home_page.dart';
+import 'theme/app_colors.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Carrega variáveis de ambiente
-  await dotenv.load(fileName: ".env");
 
-  // Configuração do Google Maps na Web
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint("Erro ao carregar .env: $e");
+  }
+
+  // Inicialização segura do Supabase
+  final supabaseUrl = dotenv.env['SUPABASE_URL'];
+  final supabaseKey = dotenv.env['SUPABASE_ANON_KEY'];
+
+  if (supabaseUrl != null && supabaseKey != null) {
+    await Supabase.initialize(
+      url: supabaseUrl,
+      anonKey: supabaseKey,
+      debug: false,
+    );
+  }
+
+  // Google Maps na Web (Só roda se for Web)
   if (kIsWeb) {
     final mapsKey = dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
     if (mapsKey.isNotEmpty) {
@@ -30,85 +41,85 @@ Future<void> main() async {
         ..id = 'google-maps-script'
         ..async = true
         ..defer = true;
-      html.document.head!.append(script);
+      html.document.head?.append(script);
     }
   }
-
-  // Inicialização do Supabase
-  await Supabase.initialize(
-    url: dotenv.env['SUPABASE_URL'] ?? '',
-    anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
-    debug: true,
-  );
-
-  // Inicialização do Stripe
-  Stripe.publishableKey = dotenv.env['STRIPE_PUBLISHABLE_KEY'] ?? '';
-  await Stripe.instance.applySettings();
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
   ));
 
-  runApp(const MonochromiaApp());
+  runApp(const MyApp());
 }
 
-class MonochromiaApp extends StatefulWidget {
-  const MonochromiaApp({super.key});
-
-  @override
-  State<MonochromiaApp> createState() => _MonochromiaAppState();
-}
-
-class _MonochromiaAppState extends State<MonochromiaApp> {
-  
-  final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
-  @override
-  void initState() {
-    super.initState();
-    
-    // Listener de Autenticação do Supabase
-    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      final AuthChangeEvent event = data.event;
-      
-      if (event == AuthChangeEvent.passwordRecovery) {
-        navigatorKey.currentState?.push(
-          MaterialPageRoute(builder: (context) => const ResetPasswordPage())
-        );
-      } else if (event == AuthChangeEvent.signedOut) {
-        navigatorKey.currentState?.pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const LoginPage()),
-          (route) => false,
-        );
-      }
-    });
-  }
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      navigatorKey: navigatorKey,
-      title: 'NexTrip',
+      title: 'NEXTRIP',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        brightness: Brightness.dark,
+        textTheme: GoogleFonts.montserratTextTheme(Theme.of(context).textTheme),
         scaffoldBackgroundColor: AppColors.black,
-        useMaterial3: true,
-        textTheme: GoogleFonts.montserratTextTheme(
-          Theme.of(context).textTheme.apply(
-            bodyColor: AppColors.white,
-            displayColor: AppColors.white,
-          ),
-        ),
+        primaryColor: AppColors.white,
         colorScheme: const ColorScheme.dark(
           primary: AppColors.white,
-          surface: AppColors.eerieBlack,
+          secondary: AppColors.white,
+          background: AppColors.black,
         ),
+        useMaterial3: true,
       ),
-      home: Supabase.instance.client.auth.currentUser != null 
-          ? const HomePage() 
-          : const LoginPage(),
+      home: const SplashPage(),
+      routes: {
+        '/login': (context) => const LoginPage(),
+        '/home': (context) => const HomePage(),
+      },
+    );
+  }
+}
+
+class SplashPage extends StatefulWidget {
+  const SplashPage({super.key});
+
+  @override
+  State<SplashPage> createState() => _SplashPageState();
+}
+
+class _SplashPageState extends State<SplashPage> {
+  @override
+  void initState() {
+    super.initState();
+    // --- CORREÇÃO DO ERRO ---
+    // Isso diz ao Flutter: "Termine de desenhar a tela preta PRIMEIRO, 
+    // e só DEPOIS verifique o login". Isso evita o travamento do Navigator.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAuth();
+    });
+  }
+
+  Future<void> _checkAuth() async {
+    if (!mounted) return;
+
+    // Obtém a sessão atual
+    final session = Supabase.instance.client.auth.currentSession;
+    
+    // Navega para a página correta
+    if (session != null) {
+      Navigator.of(context).pushReplacementNamed('/home');
+    } else {
+      Navigator.of(context).pushReplacementNamed('/login');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Tela preta instantânea enquanto decide para onde ir
+    return const Scaffold(
+      backgroundColor: AppColors.black,
+      body: SizedBox.shrink(), 
     );
   }
 }

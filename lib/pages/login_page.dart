@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:flutter/foundation.dart'; // Importante para kIsWeb
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:google_fonts/google_fonts.dart'; 
-import 'package:app_v7_web/theme/app_colors.dart';
-import 'package:app_v7_web/components/custom_input.dart';
-import 'package:app_v7_web/components/custom_button.dart';
-import 'package:app_v7_web/pages/home_page.dart';
-import 'package:app_v7_web/pages/sign_up_page.dart';
-import 'package:app_v7_web/pages/forgot_password_page.dart';
+import 'package:google_fonts/google_fonts.dart'; // <--- Importante para a fonte
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../theme/app_colors.dart';
+import '../components/custom_input.dart';
+import '../components/custom_button.dart';
+import 'home_page.dart';
+import 'sign_up_page.dart';
+import 'forgot_password_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -20,22 +20,20 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final _supabase = Supabase.instance.client;
   
-  // Criando os controladores corretamente
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   
   bool _isLoading = false;
   bool _rememberMe = false;
-  bool _isPasswordVisible = false; 
 
   @override
   void dispose() {
-    // O erro de dispose some garantindo que a classe é State<LoginPage>
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
+  // --- LOGIN COM EMAIL E SENHA ---
   Future<void> _handleLogin() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
@@ -81,6 +79,28 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  // --- LOGIN COM GOOGLE ---
+  Future<void> _handleGoogleLogin() async {
+    setState(() => _isLoading = true);
+    try {
+      await _supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: kIsWeb ? null : 'io.supabase.flutter://login-callback/',
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Erro no login com Google: $e"),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -94,22 +114,24 @@ class _LoginPageState extends State<LoginPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // --- LOGO E NOME ---
+                // --- LOGO ESTÁTICO E AJUSTADO ---
                 Image.asset(
                   'assets/images/logo_branco.png', 
-                  height: 100,
+                  height: 100, // Tamanho ajustado
                   fit: BoxFit.contain,
                   errorBuilder: (context, error, stackTrace) => 
                     const Icon(Icons.flight_takeoff, size: 80, color: Colors.white),
                 ),
                 const SizedBox(height: 16),
+                
+                // --- TEXTO NEXTRIP COM FONTE MONTSERRAT ---
                 Text(
                   'NEXTRIP',
-                  style: GoogleFonts.montserrat(
+                  style: GoogleFonts.montserrat( // <--- FONTE APLICADA AQUI
                     fontSize: 32,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w900, // Negrito forte para logo
                     color: AppColors.white,
-                    letterSpacing: 4.0,
+                    letterSpacing: 4.0, // Espaçamento para estilo
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -124,42 +146,24 @@ class _LoginPageState extends State<LoginPage> {
 
                 // --- EMAIL ---
                 CustomInput(
-                  hintText: 'E-mail',
                   controller: _emailController,
+                  hint: 'E-mail',
+                  icon: Icons.email_outlined, 
                   keyboardType: TextInputType.emailAddress,
                 ),
                 const SizedBox(height: 16),
                 
-                // --- SENHA COM TRUQUE DO STACK (Sem mexer no CustomInput) ---
-                Stack(
-                  alignment: Alignment.centerRight,
-                  children: [
-                    CustomInput(
-                      hintText: 'Senha',
-                      controller: _passwordController,
-                      obscureText: !_isPasswordVisible,
-                      // Removemos o suffixIcon daqui pois seu componente não aceita
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8.0),
-                      child: IconButton(
-                        icon: Icon(
-                          _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
-                          color: Colors.grey,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _isPasswordVisible = !_isPasswordVisible;
-                          });
-                        },
-                      ),
-                    ),
-                  ],
+                // --- SENHA ---
+                CustomInput(
+                  controller: _passwordController,
+                  hint: 'Senha',
+                  icon: Icons.lock_outline,
+                  isPassword: true,
                 ),
 
                 const SizedBox(height: 10),
 
-                // --- LEMBRAR / ESQUECEU SENHA ---
+                // --- LEMBRAR DE MIM E ESQUECEU A SENHA ---
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -197,6 +201,7 @@ class _LoginPageState extends State<LoginPage> {
 
                 const SizedBox(height: 24),
 
+                // --- BOTÃO ENTRAR ---
                 SizedBox(
                   width: double.infinity,
                   child: CustomButton(
@@ -225,25 +230,14 @@ class _LoginPageState extends State<LoginPage> {
 
                 const SizedBox(height: 24),
 
-                // --- BOTÕES SOCIAIS ---
-                Row(
-                  children: [
-                    Expanded(
-                      child: _socialButton(
-                        icon: FontAwesomeIcons.google,
-                        label: "Google",
-                        onPressed: () {},
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _socialButton(
-                        icon: FontAwesomeIcons.apple,
-                        label: "Apple",
-                        onPressed: () {},
-                      ),
-                    ),
-                  ],
+                // --- BOTÃO GOOGLE (SOMENTE) ---
+                SizedBox(
+                  width: double.infinity,
+                  child: _socialButton(
+                    icon: FontAwesomeIcons.google,
+                    label: "Entrar com Google",
+                    onPressed: _handleGoogleLogin,
+                  ),
                 ),
 
                 const SizedBox(height: 40),

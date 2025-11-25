@@ -1,11 +1,11 @@
 {
-    "name": "app_v7_web",
-    "short_name": "app_v7_web",
+    "name": "NexTrip",
+    "short_name": "NexTrip",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#000000",
+    "theme_color": "#000000",
+    "description": "Planeje sua próxima viagem com economia VIP.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
