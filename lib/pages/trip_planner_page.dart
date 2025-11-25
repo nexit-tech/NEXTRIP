@@ -124,12 +124,20 @@ class _TripPlannerPageState extends State<TripPlannerPage> {
       return;
     }
 
+    // --- CORREÇÃO: Verifica o usuário logado ---
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      _showSnackBar("Erro: Usuário não logado.", isError: true);
+      return;
+    }
+
     setState(() => _isSaving = true);
 
     try {
       dynamic tripId;
 
       final tripData = {
+        'user_id': user.id, // <--- CAMPO NOVO: Vincula a viagem ao dono
         'destination': _destinationController.text,
         'start_date': _startDate!.toIso8601String(),
         'end_date': (_endDate ?? _startDate!).toIso8601String(),

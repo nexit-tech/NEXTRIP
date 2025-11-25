@@ -5,15 +5,20 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
-import 'dart:html' as html if (dart.library.io) 'package:app_v7_web/dummy_html.dart'; 
+
+// Importação apenas para o Google Maps (se necessário)
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
 
 import 'theme/app_colors.dart';
 import 'pages/login_page.dart';
 import 'pages/reset_password_page.dart';
-import 'pages/home_page.dart'; // Importante para redirecionar
+import 'pages/home_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Carrega variáveis de ambiente
   await dotenv.load(fileName: ".env");
 
   // Configuração do Google Maps na Web
@@ -62,7 +67,8 @@ class _MonochromiaAppState extends State<MonochromiaApp> {
   @override
   void initState() {
     super.initState();
-    // Escuta eventos de Auth (Recuperação de senha, Logout, etc)
+    
+    // Listener de Autenticação do Supabase
     Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       final AuthChangeEvent event = data.event;
       
@@ -71,7 +77,6 @@ class _MonochromiaAppState extends State<MonochromiaApp> {
           MaterialPageRoute(builder: (context) => const ResetPasswordPage())
         );
       } else if (event == AuthChangeEvent.signedOut) {
-        // Se deslogar, garante que volta pro Login e limpa o histórico
         navigatorKey.currentState?.pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const LoginPage()),
           (route) => false,
@@ -101,9 +106,6 @@ class _MonochromiaAppState extends State<MonochromiaApp> {
           surface: AppColors.eerieBlack,
         ),
       ),
-      // --- AQUI É A MÁGICA DO "LEMBRAR DE MIM" ---
-      // Verifica se já existe um usuário válido no cache do Supabase.
-      // Se sim, vai direto pra Home. Se não, vai pro Login.
       home: Supabase.instance.client.auth.currentUser != null 
           ? const HomePage() 
           : const LoginPage(),
