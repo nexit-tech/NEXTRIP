@@ -1,9 +1,9 @@
 # --- Estágio 1: Construção (Build) ---
 FROM debian:latest AS build-env
 
-# Instala dependências necessárias para o Flutter
+# Instala dependências necessárias para o Flutter (LISTA CORRIGIDA)
 RUN apt-get update && \
-    apt-get install -y curl git wget unzip libgconf-2-4 gdb libstdc++6 libglu1-mesa fonts-droid-fallback lib32stdc++6 python3 && \
+    apt-get install -y curl git wget unzip gdb libstdc++6 libglu1-mesa fonts-liberation lib32stdc++6 python3 xz-utils && \
     apt-get clean
 
 # Clona o Flutter (Versão Stable)
@@ -27,7 +27,6 @@ ARG GOOGLE_MAPS_API_KEY
 ARG STRIPE_PUBLISHABLE_KEY
 
 # Cria o arquivo .env manualmente antes do build
-# (O flutter_dotenv precisa que o arquivo exista fisicamente)
 RUN echo "SUPABASE_URL=$SUPABASE_URL" > .env && \
     echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> .env && \
     echo "GOOGLE_MAPS_API_KEY=$GOOGLE_MAPS_API_KEY" >> .env && \
@@ -40,7 +39,7 @@ RUN flutter build web --release --web-renderer html
 # --- Estágio 2: Servidor (Production) ---
 FROM nginx:1.21.1-alpine
 
-# Copia a configuração do Nginx (vamos criar no passo 2)
+# Copia a configuração do Nginx
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copia os arquivos compilados do Flutter para o Nginx
