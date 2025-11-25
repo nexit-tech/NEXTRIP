@@ -23,6 +23,7 @@ class _StoresPageState extends State<StoresPage> {
   
   List<Map<String, dynamic>> _allStores = [];
   List<Map<String, dynamic>> _displayList = [];
+  Set<String> _favoriteStoreIds = {}; // Armazena IDs das lojas favoritadas
 
   @override
   void initState() {
@@ -33,13 +34,29 @@ class _StoresPageState extends State<StoresPage> {
   Future<void> _fetchStores() async {
     try {
       setState(() => _isLoading = true);
+      final user = _supabase.auth.currentUser;
 
-      // Busca lojas ordenadas por RATING padrão
+      // 1. Busca Lojas
       final response = await _supabase
           .from('stores')
           .select()
           .eq('is_active', true)
           .order('rating', ascending: false);
+
+      // 2. Busca Favoritos se usuário estiver logado
+      if (user != null) {
+        final favResponse = await _supabase
+            .from('user_favorites')
+            .select('store_id')
+            .eq('user_id', user.id)
+            .not('store_id', 'is', null); // Garante que traz só favoritos de LOJA
+        
+        if (favResponse != null) {
+          _favoriteStoreIds = (favResponse as List)
+              .map((e) => e['store_id'] as String)
+              .toSet();
+        }
+      }
 
       if (response == null) {
         setState(() => _isLoading = false);
@@ -49,7 +66,6 @@ class _StoresPageState extends State<StoresPage> {
       final List<dynamic> dataList = response as List<dynamic>;
       final cleanedData = dataList.map((item) {
         if (item is! Map) return <String, dynamic>{};
-        
         final Map<String, dynamic> store = Map<String, dynamic>.from(item);
 
         return {
@@ -58,7 +74,7 @@ class _StoresPageState extends State<StoresPage> {
           'lat': (store['latitude'] as num?)?.toDouble(),
           'lng': (store['longitude'] as num?)?.toDouble(),
           'rating': (store['rating'] as num?)?.toDouble() ?? 0.0,
-          'total_redemptions': (store['total_redemptions'] as num?)?.toInt() ?? 0, // Novo campo
+          'total_redemptions': (store['total_redemptions'] as num?)?.toInt() ?? 0,
         };
       }).toList();
 
@@ -70,13 +86,53 @@ class _StoresPageState extends State<StoresPage> {
         });
       }
     } catch (e) {
-      debugPrint('ERRO CRÍTICO NA LOJA: $e');
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      debugPrint('ERRO STORE: $e');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  // --- LÓGICA DE FAVORITAR LOJA ---
+  Future<void> _toggleStoreFavorite(String storeId) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    final isCurrentlyFav = _favoriteStoreIds.contains(storeId);
+
+    // Atualização Visual Imediata
+    setState(() {
+      if (isCurrentlyFav) {
+        _favoriteStoreIds.remove(storeId);
+      } else {
+        _favoriteStoreIds.add(storeId);
+      }
+    });
+
+    try {
+      if (!isCurrentlyFav) {
+        // Adiciona
+        await _supabase.from('user_favorites').insert({
+          'user_id': user.id,
+          'store_id': storeId,
+          // deal_id fica null aqui
+        });
+      } else {
+        // Remove
+        await _supabase.from('user_favorites')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('store_id', storeId);
+      }
+    } catch (e) {
+      // Reverte em caso de erro
+      setState(() {
+        if (isCurrentlyFav) _favoriteStoreIds.add(storeId);
+        else _favoriteStoreIds.remove(storeId);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Erro ao favoritar")));
+    }
+  }
+
+  // ... (O resto das funções _filterStores, _showFilterModal continuam iguais) ...
   void _filterStores(String query) {
     setState(() {
       _searchQuery = query;
@@ -98,30 +154,16 @@ class _StoresPageState extends State<StoresPage> {
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) => FilterModal(
-        // --- AQUI ESTÃO AS OPÇÕES PERSONALIZADAS ---
-        options: const [
-          'Relevância',
-          'Mais Bem Avaliadas',
-          'Populares',
-          'Menor Distância'
-        ],
+        options: const ['Relevância', 'Mais Bem Avaliadas', 'Populares', 'Menor Distância'],
         onApply: (sortOption) {
           Navigator.pop(context);
           setState(() {
             if (sortOption == 'Mais Bem Avaliadas') {
-              // Ordena por Rating (Maior para menor)
               _displayList.sort((a, b) => b['rating'].compareTo(a['rating']));
             } else if (sortOption == 'Populares') {
-              // Ordena por Total de Cupons Retirados (Maior para menor)
               _displayList.sort((a, b) => b['total_redemptions'].compareTo(a['total_redemptions']));
             } else if (sortOption == 'Relevância') {
-              // Volta ao padrão (que já era rating no fetch, ou alfabético se preferir)
-              _displayList = List.from(_allStores); 
-            } else if (sortOption == 'Menor Distância') {
-              // Lógica de GPS simulada (pode implementar geolocator real igual na Home)
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Calculando proximidade...", style: TextStyle(color: Colors.black)), backgroundColor: Colors.white),
-              );
+              _displayList = List.from(_allStores);
             }
           });
         },
@@ -134,10 +176,7 @@ class _StoresPageState extends State<StoresPage> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => StoreModal(
-        store: store,
-        allStores: _allStores,
-      ),
+      builder: (context) => StoreModal(store: store, allStores: _allStores),
     );
   }
 
@@ -146,17 +185,11 @@ class _StoresPageState extends State<StoresPage> {
     if (_isLoading) {
       return Scaffold(
         backgroundColor: AppColors.black,
-        body: Center(
-          child: LoadingAnimationWidget.staggeredDotsWave(
-            color: AppColors.white,
-            size: 40,
-          ),
-        ),
+        body: Center(child: LoadingAnimationWidget.staggeredDotsWave(color: AppColors.white, size: 40)),
       );
     }
 
     final isSearching = _searchQuery.isNotEmpty;
-    
     List<Map<String, dynamic>> topStores = [];
     List<Map<String, dynamic>> gridStores = [];
 
@@ -177,6 +210,7 @@ class _StoresPageState extends State<StoresPage> {
           backgroundColor: AppColors.white,
           child: CustomScrollView(
             slivers: [
+              // ... (AppBar e SearchBar continuam iguais) ...
               SliverAppBar(
                 backgroundColor: AppColors.black,
                 floating: true,
@@ -203,18 +237,12 @@ class _StoresPageState extends State<StoresPage> {
               ),
 
               if (!isSearching && topStores.isNotEmpty) ...[
-                SliverToBoxAdapter(
+                const SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-                    child: Row(
-                      children: const [
-                        SizedBox(width: 8),
-                        Text("Destaques", style: TextStyle(color: AppColors.white, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-                      ],
-                    ),
+                    padding: EdgeInsets.fromLTRB(20, 20, 20, 10),
+                    child: Text("Destaques", style: TextStyle(color: AppColors.white, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
                   ),
                 ),
-
                 SliverToBoxAdapter(
                   child: SizedBox(
                     height: 110,
@@ -225,16 +253,15 @@ class _StoresPageState extends State<StoresPage> {
                       itemBuilder: (context, index) {
                         return TopStoreCard(
                           store: topStores[index],
-                          onTap: () => _openStoreProfile(topStores[index]), 
+                          onTap: () => _openStoreProfile(topStores[index]),
                         );
                       },
                     ),
                   ),
                 ),
-
-                SliverToBoxAdapter(
+                const SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 30, 20, 10),
+                    padding: EdgeInsets.fromLTRB(20, 30, 20, 10),
                     child: Text("OUTRAS LOJAS", style: TextStyle(color: AppColors.chineseWhite, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
                   ),
                 ),
@@ -243,18 +270,18 @@ class _StoresPageState extends State<StoresPage> {
               SliverPadding(
                 padding: const EdgeInsets.all(20),
                 sliver: gridStores.isEmpty && topStores.isEmpty
-                    ? const SliverToBoxAdapter(
-                        child: Padding(
-                          padding: EdgeInsets.only(top: 50), 
-                          child: Center(child: Text("Nenhuma loja encontrada.", style: TextStyle(color: AppColors.chineseWhite)))
-                        )
-                      )
+                    ? const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.only(top: 50), child: Center(child: Text("Nenhuma loja encontrada.", style: TextStyle(color: AppColors.chineseWhite)))))
                     : SliverGrid(
                         delegate: SliverChildBuilderDelegate(
                           (context, index) {
+                            final store = gridStores[index];
+                            final isFav = _favoriteStoreIds.contains(store['id']); // Verifica se é favorito
+
                             return StoreGridItem(
-                              store: gridStores[index],
-                              onTap: () => _openStoreProfile(gridStores[index]),
+                              store: store,
+                              isFavorite: isFav, // Passa o estado
+                              onFavoriteToggle: () => _toggleStoreFavorite(store['id']), // Passa a ação
+                              onTap: () => _openStoreProfile(store),
                             );
                           },
                           childCount: gridStores.length,
@@ -267,7 +294,6 @@ class _StoresPageState extends State<StoresPage> {
                         ),
                       ),
               ),
-              
               const SliverToBoxAdapter(child: SizedBox(height: 40)),
             ],
           ),

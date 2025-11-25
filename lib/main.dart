@@ -4,16 +4,19 @@ import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_stripe/flutter_stripe.dart';
 import 'dart:html' as html if (dart.library.io) 'package:app_v7_web/dummy_html.dart'; 
 
 import 'theme/app_colors.dart';
 import 'pages/login_page.dart';
-import 'pages/reset_password_page.dart'; // <--- IMPORT DA NOVA PÁGINA
+import 'pages/reset_password_page.dart';
+import 'pages/home_page.dart'; // Importante para redirecionar
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
 
+  // Configuração do Google Maps na Web
   if (kIsWeb) {
     final mapsKey = dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
     if (mapsKey.isNotEmpty) {
@@ -26,11 +29,16 @@ Future<void> main() async {
     }
   }
 
+  // Inicialização do Supabase
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL'] ?? '',
     anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
     debug: true,
   );
+
+  // Inicialização do Stripe
+  Stripe.publishableKey = dotenv.env['STRIPE_PUBLISHABLE_KEY'] ?? '';
+  await Stripe.instance.applySettings();
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -49,32 +57,33 @@ class MonochromiaApp extends StatefulWidget {
 
 class _MonochromiaAppState extends State<MonochromiaApp> {
   
+  final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   void initState() {
     super.initState();
-    // --- OUVINTE DE EVENTOS DO SUPABASE ---
+    // Escuta eventos de Auth (Recuperação de senha, Logout, etc)
     Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       final AuthChangeEvent event = data.event;
       
-      // Se o evento for recuperação de senha...
       if (event == AuthChangeEvent.passwordRecovery) {
-        // ...Navega para a tela de Criar Nova Senha
-        // Usamos o navigatorKey global ou contexto se disponível
-        // Como estamos no main, vamos deixar o router lidar ou forçar a navegação
         navigatorKey.currentState?.push(
           MaterialPageRoute(builder: (context) => const ResetPasswordPage())
+        );
+      } else if (event == AuthChangeEvent.signedOut) {
+        // Se deslogar, garante que volta pro Login e limpa o histórico
+        navigatorKey.currentState?.pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const LoginPage()),
+          (route) => false,
         );
       }
     });
   }
 
-  // Chave global para navegação sem contexto
-  final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      navigatorKey: navigatorKey, // <--- IMPORTANTE LIGAR ISSO
+      navigatorKey: navigatorKey,
       title: 'NexTrip',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -92,7 +101,12 @@ class _MonochromiaAppState extends State<MonochromiaApp> {
           surface: AppColors.eerieBlack,
         ),
       ),
-      home: const LoginPage(),
+      // --- AQUI É A MÁGICA DO "LEMBRAR DE MIM" ---
+      // Verifica se já existe um usuário válido no cache do Supabase.
+      // Se sim, vai direto pra Home. Se não, vai pro Login.
+      home: Supabase.instance.client.auth.currentUser != null 
+          ? const HomePage() 
+          : const LoginPage(),
     );
   }
 }

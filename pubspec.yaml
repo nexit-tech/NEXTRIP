@@ -38,6 +38,9 @@ dependencies:
   google_maps_flutter: ^2.5.3
   supabase_flutter: ^2.5.1  # <-- NOVO: Adicionado Supabase
   flutter_dotenv: ^5.1.0
+  image_picker: ^1.0.4
+  flutter_stripe: ^11.3.0
+  flutter_stripe_web: ^6.5.1  # <--- ADICIONE ESSA LINHA
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

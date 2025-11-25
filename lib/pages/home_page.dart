@@ -13,7 +13,6 @@ import 'package:app_v7_web/components/home/category_filters.dart';
 import 'package:app_v7_web/components/home/deals_grid.dart';
 import 'package:app_v7_web/components/deal_modal.dart';
 import 'package:app_v7_web/components/filter_modal.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class HomePage extends StatefulWidget {
@@ -31,8 +30,7 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _allDeals = [];
   List<Map<String, dynamic>> _filteredDeals = [];
   List<Map<String, dynamic>> _highlights = [];
-  bool _isCalculatingLocation = false;
-  bool _isVip = false;
+  bool _isVip = false; // Estado do VIP
   bool _isLoadingDeals = true;
 
   @override
@@ -42,7 +40,24 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _fetchDeals() async {
+    final user = _supabase.auth.currentUser;
+
     try {
+      // 1. Busca status VIP do usuário primeiro
+      bool currentUserIsVip = false;
+      if (user != null) {
+        final profileResponse = await _supabase
+            .from('profiles')
+            .select('is_vip')
+            .eq('id', user.id)
+            .maybeSingle();
+
+        if (profileResponse != null) {
+            currentUserIsVip = profileResponse['is_vip'] ?? false;
+        }
+      }
+
+      // 2. Busca todas as ofertas ativas
       final response = await _supabase
           .from('deals')
           .select('*, stores(name, category, latitude, longitude, phone, address)')
@@ -50,6 +65,22 @@ class _HomePageState extends State<HomePage> {
           .order('redemptions', ascending: false);
 
       if (response == null) return;
+
+      // 3. Busca os IDs dos favoritos do usuário logado
+      Set<String> favoriteIds = {};
+      if (user != null) {
+        final favResponse = await _supabase
+            .from('user_favorites')
+            .select('deal_id')
+            .eq('user_id', user.id);
+        
+        if (favResponse != null) {
+          favoriteIds = (favResponse as List)
+              .map((e) => e['deal_id'] as String?)
+              .whereType<String>()
+              .toSet();
+        }
+      }
 
       final dataList = response as List<dynamic>;
       
@@ -85,7 +116,7 @@ class _HomePageState extends State<HomePage> {
           'final_price': finalPrice,
           'offer': offerText,
           'redemptions': item['redemptions'] ?? 0,
-          'isFavorite': false, // Começa falso, mas vamos mudar isso em breve
+          'isFavorite': favoriteIds.contains(item['id']), 
         };
       }).toList();
 
@@ -94,8 +125,10 @@ class _HomePageState extends State<HomePage> {
           _allDeals = cleanedData;
           _filteredDeals = cleanedData;
           _highlights = cleanedData.take(3).toList(); 
+          _isVip = currentUserIsVip; // <--- ATUALIZA O ESTADO AQUI
           _isLoadingDeals = false;
         });
+        _runFilter();
       }
     } catch (e) {
       debugPrint("Erro Deals: $e");
@@ -103,11 +136,38 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // --- LÓGICA DO FAVORITO ---
-  void _toggleFavorite(Map<String, dynamic> item) {
+  // --- LÓGICA DO FAVORITO (REAL NO BANCO) ---
+  Future<void> _toggleFavorite(Map<String, dynamic> item) async {
+    final user = _supabase.auth.currentUser;
+    
+    if (user == null) {
+      _showSnackBar("Faça login para favoritar!", icon: Icons.lock_outline);
+      return;
+    }
+
     setState(() {
       item['isFavorite'] = !item['isFavorite'];
     });
+
+    try {
+      if (item['isFavorite']) {
+        await _supabase.from('user_favorites').insert({
+          'user_id': user.id,
+          'deal_id': item['id'],
+        });
+      } else {
+        await _supabase.from('user_favorites')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('deal_id', item['id']);
+      }
+    } catch (e) {
+      setState(() {
+        item['isFavorite'] = !item['isFavorite'];
+      });
+      debugPrint("Erro ao favoritar: $e");
+      _showSnackBar("Erro ao salvar favorito.", icon: Icons.error_outline);
+    }
   }
 
   void _runFilter() {
@@ -128,15 +188,37 @@ class _HomePageState extends State<HomePage> {
       builder: (context) => DealModal(
         item: item,
         isFavorite: item['isFavorite'],
-        // Passamos a função para o modal atualizar a Home
         onFavoriteToggle: () => _toggleFavorite(item),
       ),
     );
   }
 
-  // ... Métodos auxiliares (SnackBar, FilterModal, etc)
-  void _showSnackBar(String msg, {IconData icon = Icons.info_outline}) { ScaffoldMessenger.of(context).clearSnackBars(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Row(children: [Icon(icon, color: AppColors.black, size: 20), const SizedBox(width: 12), Expanded(child: Text(msg, style: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold)))]), backgroundColor: AppColors.white, behavior: SnackBarBehavior.floating, margin: const EdgeInsets.all(16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))); }
-  void _showFilterModal() { showModalBottomSheet(context: context, backgroundColor: Colors.transparent, builder: (context) => FilterModal(onApply: (s) => Navigator.pop(context))); }
+  void _showSnackBar(String msg, {IconData icon = Icons.info_outline}) { 
+    ScaffoldMessenger.of(context).clearSnackBars(); 
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(icon, color: AppColors.black, size: 20), 
+            const SizedBox(width: 12), 
+            Expanded(child: Text(msg, style: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold)))
+          ]
+        ), 
+        backgroundColor: AppColors.white, 
+        behavior: SnackBarBehavior.floating, 
+        margin: const EdgeInsets.all(16), 
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+      )
+    ); 
+  }
+  
+  void _showFilterModal() { 
+    showModalBottomSheet(
+      context: context, 
+      backgroundColor: Colors.transparent, 
+      builder: (context) => FilterModal(onApply: (s) => Navigator.pop(context))
+    ); 
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -144,6 +226,7 @@ class _HomePageState extends State<HomePage> {
       _buildHomeBody(),
       StoresPage(),
       const TravelPage(),
+      // O ProfilePage agora tem um callback para atualizar o _isVip
       ProfilePage(isVip: _isVip, onVipStatusChanged: (s) => setState(() => _isVip = s)),
     ];
 
@@ -152,8 +235,23 @@ class _HomePageState extends State<HomePage> {
       body: Stack(
         children: [
           screens[_currentIndex],
+          
+          // --- CONDIÇÃO AJUSTADA ---
+          // SÓ MOSTRA SE ESTIVER NA TELA HOME (0) E NÃO FOR VIP (!isVip)
           if (_currentIndex == 0 && !_isVip)
-            Positioned(bottom: 16, right: 16, child: FloatingActionButton(onPressed: () async { final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => const SubscriptionPage())); if(res==true) setState(()=>_isVip=true); }, backgroundColor: AppColors.white, child: const Icon(FontAwesomeIcons.crown, color: AppColors.black))),
+            Positioned(
+              bottom: 16, 
+              right: 16, 
+              child: FloatingActionButton(
+                onPressed: () async { 
+                  final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => const SubscriptionPage())); 
+                  // Se o pagamento foi concluído, o ProfilePage's onVipStatusChanged lida com isso.
+                  if(res==true) setState(()=>_isVip=true); 
+                }, 
+                backgroundColor: AppColors.white, 
+                child: const Icon(FontAwesomeIcons.crown, color: AppColors.black)
+              )
+            ),
         ],
       ),
       bottomNavigationBar: CustomNavBar(currentIndex: _currentIndex, onTap: (i) => setState(() => _currentIndex = i)),
@@ -164,16 +262,23 @@ class _HomePageState extends State<HomePage> {
     return SafeArea(
       child: CustomScrollView(
         slivers: [
-          HomeAppBar(onSearchChanged: (v) { _searchQuery = v; _runFilter(); }, onFilterTap: _showFilterModal, isCalculatingLocation: false),
+          HomeAppBar(
+            onSearchChanged: (v) { _searchQuery = v; _runFilter(); }, 
+            onFilterTap: _showFilterModal, 
+            isCalculatingLocation: false
+          ),
           
           if (!_isLoadingDeals && _highlights.isNotEmpty) 
             HighlightCarousel(
               highlights: _highlights, 
               onHighlightTap: (item) => _showDealDetails(context, item),
-              onFavoriteToggle: (item) => _toggleFavorite(item), // <--- Passando a função pro Carrossel
+              onFavoriteToggle: (item) => _toggleFavorite(item),
             ),
 
-          CategoryFilters(selectedCategory: _selectedCategory, onCategorySelected: (c) => setState(() { _selectedCategory = c; _runFilter(); })),
+          CategoryFilters(
+            selectedCategory: _selectedCategory, 
+            onCategorySelected: (c) => setState(() { _selectedCategory = c; _runFilter(); })
+          ),
           
           if (_isLoadingDeals) 
             const SliverToBoxAdapter(child: Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator(color: Colors.white)))) 
@@ -181,7 +286,7 @@ class _HomePageState extends State<HomePage> {
             DealsGrid(
               deals: _filteredDeals, 
               onDealTap: (item) => _showDealDetails(context, item),
-              onFavoriteToggle: (item) => _toggleFavorite(item), // <--- Passando a função pro Grid
+              onFavoriteToggle: (item) => _toggleFavorite(item), 
             ),
             
           const SliverToBoxAdapter(child: SizedBox(height: 80)),

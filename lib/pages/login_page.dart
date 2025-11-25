@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // Import Supabase
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:app_v7_web/theme/app_colors.dart';
 import 'package:app_v7_web/components/custom_input.dart';
 import 'package:app_v7_web/components/custom_button.dart';
@@ -16,7 +17,7 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final _supabase = Supabase.instance.client; // Cliente Supabase
+  final _supabase = Supabase.instance.client;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
@@ -31,17 +32,20 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
 
     try {
-      // Autenticação Real
       final AuthResponse res = await _supabase.auth.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
 
-      if (res.user != null) {
-        if (mounted) {
-          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomePage()));
-        }
+      // --- CORREÇÃO AQUI: NAVEGAÇÃO EXPLÍCITA ---
+      if (res.user != null && mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const HomePage()),
+            (route) => false,
+        );
       }
+      // ------------------------------------------
+      
     } on AuthException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: Colors.redAccent));
@@ -54,6 +58,38 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
+
+  // --- HANDLER PARA LOGIN SOCIAL ---
+  Future<void> _handleSocialLogin(OAuthProvider provider) async {
+    // Implementamos apenas o Google por enquanto
+    if (provider != OAuthProvider.google) return; 
+    
+    setState(() => _isLoading = true);
+    
+    final String? redirectToUrl = kIsWeb ? null : 'io.supabase.flutter://login-callback';
+
+    try {
+      await _supabase.auth.signInWithOAuth(
+        provider,
+        redirectTo: redirectToUrl,
+      );
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Erro ao logar com Google. Verifique a configuração."), backgroundColor: Colors.redAccent)
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Falha na autenticação social."), backgroundColor: Colors.redAccent)
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -147,12 +183,13 @@ class _LoginPageState extends State<LoginPage> {
 
                         const SizedBox(height: 24),
 
-                        Row(
-                          children: [
-                            Expanded(child: _socialButton(icon: FontAwesomeIcons.google, label: 'Google', onTap: () {})),
-                            const SizedBox(width: 16),
-                            Expanded(child: _socialButton(icon: FontAwesomeIcons.apple, label: 'Apple', onTap: () {})),
-                          ],
+                        SizedBox(
+                          width: double.infinity,
+                          child: _socialButton(
+                            icon: FontAwesomeIcons.google, 
+                            label: 'Google', 
+                            onPressed: () => _handleSocialLogin(OAuthProvider.google)
+                          ),
                         ),
                       ],
                     ),
@@ -174,9 +211,9 @@ class _LoginPageState extends State<LoginPage> {
                               MaterialPageRoute(builder: (context) => const SignUpPage())
                             );
                           },
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: const Text(
+                          child: const Padding(
+                            padding: EdgeInsets.all(8.0),
+                            child: Text(
                               'Cadastre-se',
                               style: TextStyle(
                                 color: AppColors.white,
@@ -199,9 +236,9 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  Widget _socialButton({required IconData icon, required String label, required VoidCallback onTap}) {
+  Widget _socialButton({required IconData icon, required String label, required VoidCallback onPressed}) {
     return OutlinedButton(
-      onPressed: onTap,
+      onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(vertical: 16),
         side: const BorderSide(color: AppColors.nightRider),

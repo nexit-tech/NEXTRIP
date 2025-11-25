@@ -8,9 +8,9 @@ class CustomButton extends StatelessWidget {
   final bool isOutlined;
   final bool isLoading;
   final IconData? icon;
-  // --- NOVAS PROPRIEDADES OPCIONAIS ---
   final Color? backgroundColor;
   final Color? textColor;
+  final Color? borderColor; // <--- NOVO CAMPO
 
   const CustomButton({
     super.key,
@@ -19,21 +19,23 @@ class CustomButton extends StatelessWidget {
     this.isOutlined = false,
     this.isLoading = false,
     this.icon,
-    // --- RECEBE ELAS NO CONSTRUTOR ---
     this.backgroundColor,
     this.textColor,
+    this.borderColor, // <--- Recebe no construtor
   });
 
   @override
   Widget build(BuildContext context) {
+    // Se for Outlined (botão vazado)
     if (isOutlined) {
       return OutlinedButton.icon(
         onPressed: isLoading ? null : onPressed,
-        icon: Icon(icon ?? Icons.arrow_forward, size: 20), 
+        icon: Icon(icon ?? Icons.arrow_forward, size: 20),
         label: Text(text),
         style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.white,
-          side: const BorderSide(color: AppColors.nightRider),
+          foregroundColor: textColor ?? AppColors.white,
+          // Usa a cor da borda passada ou a padrão
+          side: BorderSide(color: borderColor ?? AppColors.nightRider),
           padding: const EdgeInsets.symmetric(vertical: 18),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -42,18 +44,19 @@ class CustomButton extends StatelessWidget {
       );
     }
 
-    // Define as cores finais (usa a passada ou a padrão se for nula)
+    // Se for ElevatedButton (botão preenchido)
     final finalBgColor = backgroundColor ?? AppColors.white;
     final finalTextColor = textColor ?? AppColors.black;
 
     return ElevatedButton(
       onPressed: isLoading ? null : onPressed,
       style: ElevatedButton.styleFrom(
-        // --- USA AS CORES DEFINIDAS ---
         backgroundColor: finalBgColor,
         disabledBackgroundColor: finalBgColor.withOpacity(0.5),
         foregroundColor: finalTextColor,
         padding: const EdgeInsets.symmetric(vertical: 18),
+        // Aqui também aplicamos a borda se ela for passada
+        side: borderColor != null ? BorderSide(color: borderColor!) : null,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
@@ -61,7 +64,6 @@ class CustomButton extends StatelessWidget {
       ),
       child: isLoading
           ? LoadingAnimationWidget.staggeredDotsWave(
-              // O loading também segue a cor do texto
               color: finalTextColor,
               size: 24,
             )
@@ -69,7 +71,7 @@ class CustomButton extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (icon != null) ...[
-                  Icon(icon, size: 20),
+                  Icon(icon, size: 20, color: finalTextColor),
                   const SizedBox(width: 8),
                 ],
                 Text(
